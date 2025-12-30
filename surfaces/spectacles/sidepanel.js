@@ -121,19 +121,61 @@ function scrollToBottom() {
 
 // --- Event Listeners ---
 
-sendBtn.addEventListener('click', () => {
+sendBtn.addEventListener('click', async () => {
     const text = input.value.trim();
     if (text) {
         addUserMessage(text);
         input.value = '';
-        setTimeout(() => {
-            // Simulate response based on context
-            if (currentContext === 'EMAIL') addSystemMessage("Drafting reply based on thread context...");
-            else if (currentContext === 'PATIENT') addSystemMessage("Querying HIPAA-compliant database...");
-            else addSystemMessage("Processing command...");
-        }, 600);
+
+        // Show loading indicator
+        const loadingId = addSystemMessage('<div class="spinner-dots">Thinking...</div>', true);
+
+        try {
+            const response = await fetch('http://localhost:8000/api/spectacles/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: "spectacles_user", // TODO: Get real user
+                    messages: [{ role: "user", content: text }], // In real app, send full history
+                    stream: false
+                })
+            });
+
+            const data = await response.json();
+
+            // Remove loading and show response
+            removeMessage(loadingId);
+            addSystemMessage(data.content);
+
+        } catch (error) {
+            removeMessage(loadingId);
+            addSystemMessage("⚠️ Connection to Nexus failed. Is the backend running?");
+            console.error(error);
+        }
     }
 });
+
+function removeMessage(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+// Modify addSystemMessage to return ID and allow HTML
+function addSystemMessage(text, isHtml = false) {
+    const msgDiv = document.createElement('div');
+    const id = 'msg-' + Date.now();
+    msgDiv.id = id;
+    msgDiv.className = 'message system-message';
+    msgDiv.innerHTML = `
+        <div class="avatar">
+            <svg viewBox="0 0 24 24" class="icon" style="width:14px;height:14px;"><path d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" fill="currentColor"/></svg>
+        </div>
+        <div class="bubble">${isHtml ? text : text}</div>
+    `;
+    chatContainer.appendChild(msgDiv);
+    scrollToBottom();
+    return id;
+}
 
 input.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendBtn.click();

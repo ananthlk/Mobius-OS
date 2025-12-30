@@ -26,7 +26,7 @@ export default function Dashboard() {
         setLoading(true);
 
         try {
-            const response = await fetch("http://localhost:8000/api/chat/completions", {
+            const response = await fetch("http://localhost:8000/api/portal/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -110,8 +110,8 @@ export default function Dashboard() {
                     {messages.map((msg, idx) => (
                         <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-[80%] md:max-w-[70%] rounded-[20px] px-6 py-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user'
-                                    ? 'bg-[#E8F0FE] text-[#1f1f1f] rounded-tr-none' // User: Light Blue (Google User style)
-                                    : 'bg-white border border-gray-100 text-[#1f1f1f] rounded-tl-none' // Assistant: White
+                                ? 'bg-[#E8F0FE] text-[#1f1f1f] rounded-tr-none' // User: Light Blue (Google User style)
+                                : 'bg-white border border-gray-100 text-[#1f1f1f] rounded-tl-none' // Assistant: White
                                 }`}>
                                 {msg.content}
                             </div>
