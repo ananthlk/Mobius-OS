@@ -91,18 +91,7 @@ function setContext(mode) {
     addSystemMessage(`Context switched to: ${ctx.name}`);
 }
 
-function addSystemMessage(text) {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = 'message system-message';
-    msgDiv.innerHTML = `
-        <div class="avatar">
-            <svg viewBox="0 0 24 24" class="icon" style="width:14px;height:14px;"><path d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" fill="currentColor"/></svg>
-        </div>
-        <div class="bubble">${text}</div>
-    `;
-    chatContainer.appendChild(msgDiv);
-    scrollToBottom();
-}
+
 
 function addUserMessage(text) {
     const msgDiv = document.createElement('div');
