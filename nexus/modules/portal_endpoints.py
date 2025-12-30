@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
 import time
-from modules.database import database
+from nexus.modules.database import database
 
 router = APIRouter()
 

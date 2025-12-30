@@ -71,7 +71,7 @@ export default function Home() {
                 {/* Primary CTA */}
                 <div className="mt-10">
                     <Link
-                        href="/auth/signin"
+                        href="/dashboard"
                         className="group inline-flex items-center gap-2 text-sm font-medium text-[#5f6368] hover:text-[#1a73e8] transition-colors py-2 px-4"
                     >
                         <span>Enter Continuum</span>

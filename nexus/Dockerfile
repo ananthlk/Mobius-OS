@@ -12,9 +12,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy application code to subdirectory to preserve 'nexus' package structure
+COPY . ./nexus
+ENV PYTHONPATH=/app
 
-# Run entrypoint (Shell form to allow variable expansion)
-CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"
+# Run entrypoint
+CMD sh -c "uvicorn nexus.app:app --host 0.0.0.0 --port ${PORT:-8000}"
 

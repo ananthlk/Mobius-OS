@@ -55,9 +55,17 @@ export default function Dashboard() {
                     <span className="font-semibold text-xl text-[#5F6368]">Mobius</span>
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 shadow-sm mb-6 cursor-pointer hover:shadow-md transition-shadow flex items-center gap-3 text-[#1f1f1f]">
-                    <Plus className="w-5 h-5 text-[#1a73e8]" />
-                    <span className="font-medium">New Chat</span>
+                <div className="bg-white rounded-2xl p-4 shadow-sm mb-6 flex flex-col gap-2">
+                    <div className="flex items-center gap-3 text-[#1f1f1f] cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors">
+                        <Plus className="w-5 h-5 text-[#1a73e8]" />
+                        <span className="font-medium">New Chat</span>
+                    </div>
+                    <a href="/dashboard/workflows/new" className="flex items-center gap-3 text-[#1f1f1f] cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors">
+                        <div className="w-5 h-5 rounded flex items-center justify-center bg-purple-100 text-purple-600">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                        </div>
+                        <span className="font-medium">New Workflow</span>
+                    </a>
                 </div>
 
                 <nav className="flex-1 space-y-1">
