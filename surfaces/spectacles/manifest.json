@@ -1,0 +1,21 @@
+{
+    "manifest_version": 3,
+    "name": "Mobius Spectacles",
+    "version": "0.1.0",
+    "description": "Context-aware interface for Mobius OS",
+    "permissions": [
+        "activeTab",
+        "sidePanel",
+        "storage"
+    ],
+    "side_panel": {
+        "default_path": "sidepanel.html"
+    },
+    "action": {
+        "default_title": "Open Mobius",
+        "default_popup": "popup.html"
+    },
+    "background": {
+        "service_worker": "background.js"
+    }
+}

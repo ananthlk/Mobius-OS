@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Mobius OS - Wake Up Script
+# Usage: ./mobius.sh
+
+echo "🌀 Awakening Mobius OS..."
+
+# 1. Kill existing processes on ports 3000 (Portal) and 8000 (Nexus)
+echo "   [1/4] Clearing neural pathways (Ports 3000, 8000)..."
+lsof -ti:3000 | xargs kill -9 2>/dev/null
+lsof -ti:8000 | xargs kill -9 2>/dev/null
+
+# 2. Ensure Database is running
+echo "   [2/4] Checking emotional memory (PostgreSQL)..."
+brew services start postgresql@14 >/dev/null 2>&1
+
+# 3. Start Nexus (Backend)
+echo "   [3/4] Ignition: Nexus (Brain)..."
+source venv311/bin/activate
+cd nexus
+nohup uvicorn app:app --host 0.0.0.0 --port 8000 --reload > ../nexus.log 2>&1 &
+echo "         (PID: $!)"
+cd ..
+
+# 4. Start Portal (Frontend)
+echo "   [4/4] Opening eyes: Portal (Interface)..."
+cd surfaces/portal
+nohup npm run dev > ../../portal.log 2>&1 &
+echo "         (PID: $!)"
+cd ../..
+
+echo "✨ Mobius is Online."
+echo "   -> Portal: http://localhost:3000"
+echo "   -> Nexus:  http://localhost:8000"
+echo "   -> Logs:   tail -f nexus.log portal.log"
