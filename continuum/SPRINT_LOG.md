@@ -15,10 +15,19 @@ Successfully established the "High-Trust / Minimalist" visual identity for Mobiu
   - Added "Secure Channel" and HIPAA-compliant footer micro-copy to establish trust.
 - **Spectacles (`surfaces/spectacles`)**:
   - Created a side-panel based Chrome Extension.
-  - mirrored the Portal's high-trust aesthetic (shared color tokens, identical SVG logo).
+  - Mirrored the Portal's high-trust aesthetic (shared color tokens, identical SVG logo).
   - Implemented a "Context-Aware" UI mockup that switches modes (Idle, Email, Web, Patient) to demonstrate intent.
 
+## Sprint 1: "The Functional Backbone"
+**Status:** IN PROGRESS 🟡
+**Date:** 2025-12-30
+
+### 🏗️ Infrastructure & Architecture
+- **API Separation**: Split `nexus` into surface-specific lanes (`/api/spectacles`, `/api/portal`) to cleaner logic isolation.
+- **GCP Deployment**: Configured `cloudbuild.yaml` and production `Dockerfile`s for Cloud Run auto-deployment.
+- **Documentation**: Added `DEVELOPER_GUIDE.md` and `GCP_README.md` to standardize workflows.
+
 ### 🧠 RAG Context Tags
-`#aesthetic` `#branding` `#tailwind` `#chrome-extension` `#nextjs` `#landing-page` `#ui-design` `#sprint-minus-1`
+`#aesthetic` `#branding` `#tailwind` `#chrome-extension` `#nextjs` `#landing-page` `#ui-design` `#sprint-minus-1` `#docker` `#gcp` `#infrastructure`
 
 ---

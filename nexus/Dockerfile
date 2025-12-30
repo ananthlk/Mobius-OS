@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Run entrypoint
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run entrypoint (Shell form to allow variable expansion)
+CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"
 
