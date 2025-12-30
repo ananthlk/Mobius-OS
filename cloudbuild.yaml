@@ -1,0 +1,19 @@
+steps:
+  # 1. Build Nexus (Backend)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/mobius-nexus', './nexus']
+
+  # 2. Build Portal (Frontend)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/mobius-portal', './surfaces/portal']
+
+  # 3. Push Nexus Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/mobius-nexus']
+
+  # 4. Push Portal Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/mobius-portal']
+
+options:
+  logging: CLOUD_LOGGING_ONLY
