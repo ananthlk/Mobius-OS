@@ -12,8 +12,7 @@
         "default_path": "sidepanel.html"
     },
     "action": {
-        "default_title": "Open Mobius",
-        "default_popup": "popup.html"
+        "default_title": "Open Mobius Side Panel"
     },
     "background": {
         "service_worker": "background.js"
