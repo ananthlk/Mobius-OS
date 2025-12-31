@@ -33,18 +33,25 @@ export default function DashboardLayout({
         fetchActivity();
     }, [pathname]); // Re-fetch when path changes
 
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
     return (
         <div className="flex h-screen bg-[#F8F9FA] font-sans text-[#202124]">
-            {/* Sidebar (Navigation Rail) */}
-            <aside className="w-[280px] bg-[#F0F4F8] p-4 flex flex-col hidden md:flex rounded-r-2xl m-2 ml-0">
-                <div className="flex items-center gap-3 px-4 mb-8 mt-2">
+            {/* Sidebar (Navigation Rail) - Collapsible */}
+            <aside
+                className={`
+                    bg-[#F0F4F8] p-4 flex flex-col hidden md:flex rounded-r-2xl m-2 ml-0 transition-all duration-300 ease-in-out border-r border-gray-100/50
+                    ${isSidebarOpen ? 'w-[280px] opacity-100 translate-x-0' : 'w-0 p-0 opacity-0 -translate-x-4 overflow-hidden border-none m-0'}
+                `}
+            >
+                <div className="flex items-center gap-3 px-4 mb-8 mt-2 min-w-max">
                     <div className="w-8 h-8 rounded-full border-[3px] border-l-[#4285F4] border-t-[#EA4335] border-r-[#FBBC05] border-b-[#34A853]"></div>
                     <span className="font-semibold text-xl text-[#5F6368]">Mobius</span>
                 </div>
 
                 {/* Modules Section */}
-                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2">Modules</div>
-                <nav className="space-y-1 mb-8">
+                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2 min-w-max">Modules</div>
+                <nav className="space-y-1 mb-8 min-w-max">
                     <Link href="/dashboard/chat">
                         <div className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-colors ${isActive('/dashboard/chat') ? 'bg-white text-[#1a73e8] shadow-sm' : 'text-[#444746] hover:bg-white/60'}`}>
                             <MessageSquare className={`w-5 h-5 ${isActive('/dashboard/chat') ? 'text-[#1a73e8]' : 'text-[#5F6368]'}`} />
@@ -71,16 +78,16 @@ export default function DashboardLayout({
                     </Link>
                 </nav>
 
-                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2">
+                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2 min-w-max">
                     {isActive('/dashboard/workflows') ? 'Recent Workflows' : 'Recent Chats'}
                 </div>
-                <nav className="flex-1 space-y-1 overflow-y-auto">
+                <nav className="flex-1 space-y-1 overflow-y-auto min-w-max">
                     {recentActivity.map((item: any) => (
                         <SidebarItem key={item.id} label={item.title} />
                     ))}
                 </nav>
 
-                <div className="mt-auto flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors">
+                <div className="mt-auto flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-max">
                     {session?.user?.image ? (
                         <img src={session.user.image} className="w-8 h-8 rounded-full" />
                     ) : (
@@ -95,7 +102,16 @@ export default function DashboardLayout({
             </aside>
 
             {/* Main Content Area */}
-            <main className="flex-1 flex flex-col relative bg-white m-2 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <main className="flex-1 flex flex-col relative bg-white m-2 rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all duration-300">
+                {/* Toggle Button (Absolute Pinned) */}
+                <button
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    className="absolute top-4 left-4 z-50 p-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
                 {children}
             </main>
         </div>
