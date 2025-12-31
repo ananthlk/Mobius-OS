@@ -5,6 +5,7 @@ from nexus.modules.spectacles_endpoints import router as spectacles_router
 from nexus.modules.portal_endpoints import router as portal_router
 from nexus.modules.workflow_endpoints import router as workflows_router
 from nexus.modules.system_endpoints import router as system_router
+from nexus.modules.admin_endpoints import router as admin_router
 from nexus.modules.database import connect_to_db, disconnect_from_db, init_db
 from nexus.recipes.crm_recipes import register_crm_recipes
 
