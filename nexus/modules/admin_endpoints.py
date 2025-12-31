@@ -39,6 +39,39 @@ async def create_provider(req: ProviderCreate):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+class TestConnectionRequest(BaseModel):
+    provider_id: int
+    
+@router.post("/providers/test")
+async def test_provider_connection(req: TestConnectionRequest):
+    """
+    Attempts to send a 'Hello' message to the provider to verify creds.
+    """
+    # 1. Get Provider Name
+    providers = await config_manager.list_providers() # Naive, better to get by ID
+    target = next((p for p in providers if p["id"] == req.provider_id), None)
+    
+    if not target:
+        raise HTTPException(status_code=404, detail="Provider not found")
+        
+    from nexus.modules.llm_gateway import gateway
+    
+    try:
+        # Simple Hello World
+        response = await gateway.chat_completion(
+            messages=[{"role": "user", "content": "Hello, are you online?"}],
+            provider_name=target["name"]
+        )
+        return {
+            "status": "success", 
+            "message": "Connection Successful!", 
+            "reply": response["content"], 
+            "model": response["model"]
+        }
+    except Exception as e:
+        logger.error(f"Test Connection Failed: {e}")
+        return {"status": "error", "message": str(e)}
+
 @router.post("/secrets")
 async def update_secret(req: SecretUpdate):
     """

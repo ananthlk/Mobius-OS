@@ -112,6 +112,24 @@ export default function LLMAdminPage() {
         setSelectedProvider(null);
     };
 
+    const handleTestConnection = async (p: Provider) => {
+        try {
+            const res = await fetch(`${API_URL}/api/admin/ai/providers/test`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ provider_id: p.id })
+            });
+            const data = await res.json();
+            if (data.status === "success") {
+                alert(`✅ Success!\nModel: ${data.model}\nReply: ${data.reply}`);
+            } else {
+                alert(`❌ Failed: ${data.message}`);
+            }
+        } catch (e) {
+            alert("Network Error");
+        }
+    };
+
     return (
         <div className="h-full w-full p-8 overflow-y-auto bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
             <header className="mb-8 flex justify-between items-center">
@@ -203,8 +221,14 @@ export default function LLMAdminPage() {
                                         Active
                                     </div>
                                     <button
+                                        onClick={() => handleTestConnection(provider)}
+                                        className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors border border-blue-200 dark:border-blue-800"
+                                    >
+                                        Test
+                                    </button>
+                                    <button
                                         onClick={() => openKeyModal(provider)}
-                                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors border border-slate-200 dark:border-slate-700"
                                     >
                                         Manage Keys
                                     </button>
