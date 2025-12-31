@@ -1,18 +1,17 @@
-from typing import List, Optional, Dict, Any
-import json
-from nexus.modules.database import database
+import logging
+
+logger = logging.getLogger("nexus.shaping")
 
 class ShapingManager:
     """
     Manages the 'Workflow Shaping' chat sessions.
-    These are distinct from general chat; their goal is to identify a problem 
-    and produce a workflow recipe.
     """
 
     async def create_session(self, user_id: str, initial_query: str) -> int:
         """
         Starts a new shaping session.
         """
+        logger.info(f"Creating session for {user_id}")
         # Initial transcript with user's first query
         transcript = [
             {"role": "user", "content": initial_query, "timestamp": "now"} # simplified timestamp for JSON
@@ -29,10 +28,19 @@ class ShapingManager:
             "transcript": json.dumps(transcript)
         })
         
+        logger.info(f"Session persisted. ID: {session_id}")
+        
         # Also log to User Activity
         await self._log_activity(user_id, session_id, initial_query)
         
         return session_id
+    
+    # ... append_message (no changes needed, inferred from workflow logs) ...
+
+    async def _log_activity(self, user_id: str, session_id: int, query: str):
+        # ... logic ...
+        logger.debug(f"Logged user activity for session {session_id}")
+        # ... db insert ...
 
     async def append_message(self, session_id: int, role: str, content: str) -> None:
         """
