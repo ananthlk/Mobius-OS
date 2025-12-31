@@ -82,12 +82,12 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
             {/* Main Input - Light Theme */}
             <div className="w-full relative group z-10">
                 <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-purple-500/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-                <div className={`relative bg-white border border-[#E5E7EB] rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] flex items-center p-2 transition-all group-hover:border-blue-400/30 group-hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] ${loading ? 'opacity-75' : ''}`}>
-                    <div className="pl-4 pr-3 text-[#9CA3AF]">
+                <div className={`relative bg-white border border-[#E5E7EB] rounded-xl shadow-sm flex items-center p-1.5 transition-all group-hover:border-blue-400/30 group-hover:shadow-md ${loading ? 'opacity-75' : ''}`}>
+                    <div className="pl-3 pr-2 text-[#9CA3AF]">
                         {loading ? (
-                            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                         ) : (
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         )}
                     </div>
                     <input
@@ -95,7 +95,7 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        className="flex-1 bg-transparent border-none text-lg text-[#1A1A1A] placeholder-[#9CA3AF] focus:outline-none focus:ring-0 py-3 font-light"
+                        className="flex-1 bg-transparent border-none text-base text-[#1A1A1A] placeholder-[#9CA3AF] focus:outline-none focus:ring-0 py-2 font-light"
                         placeholder="e.g. Patient intake errors..."
                         autoFocus
                         disabled={loading}
@@ -103,9 +103,9 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
                     <button
                         onClick={() => query.trim() && handleDiagnose()}
                         disabled={loading}
-                        className="bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-xl px-4 py-2 transition-colors disabled:opacity-50"
+                        className="bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
                     >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
                     </button>
                 </div>
             </div>
