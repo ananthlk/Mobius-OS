@@ -43,40 +43,40 @@ async def init_db():
     await database.execute(query=query_recipes)
 
     # Run Migrations
-    
-    # 001: Initial Schema
-    with open("nexus/migrations/001_initial_schema.sql", "r") as f:
-        await database.execute(f.read())
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # nexus/
+    MIGRATIONS_DIR = os.path.join(BASE_DIR, "migrations")
+
+    # Helper to read SQL
+    def read_migration(filename):
+        path = os.path.join(MIGRATIONS_DIR, filename)
+        with open(path, "r") as f:
+            return f.read()
+
+    # 001: Initial Interactions
+    await database.execute(read_migration("001_create_interactions.sql"))
         
-    # 002: Seed Data
-    with open("nexus/migrations/002_seed_data.sql", "r") as f:
-        # Simple split by statement (naive)
-        sql = f.read()
-        statements = sql.split(";")
-        for stmt in statements:
+    # 002: Recipes Table
+    seed_sql = read_migration("002_create_recipes.sql")
+    for stmt in seed_sql.split(";"):
+        if stmt.strip():
+            await database.execute(stmt)
+
+    # 003: Advanced Schema
+    try:
+        sql = read_migration("003_advanced_schema.sql")
+        for stmt in sql.split(";"):
             if stmt.strip():
                 await database.execute(stmt)
-
-    # 003: Advanced Schema (Split execution for DO blocks safety)
-    try:
-        with open("nexus/migrations/003_advanced_schema.sql", "r") as f:
-            sql = f.read()
-            statements = sql.split(";")
-            for stmt in statements:
-                if stmt.strip():
-                    await database.execute(stmt)
     except Exception as e:
         print(f"Migration 003 Warning: {e}")
 
-    # 004: AI Gateway (Split execution)
+    # 004: AI Gateway
     try:
-        with open("nexus/migrations/004_ai_gateway.sql", "r") as f:
-            sql = f.read()
-            statements = sql.split(";")
-            for stmt in statements:
-                if stmt.strip():
-                    await database.execute(stmt)
+        sql = read_migration("004_ai_gateway.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
         print("Migration 004 (AI Gateway) applied.")
     except Exception as e:
-        print(f"Migration 004 Error: {e}")
+         print(f"Migration 004 Error: {e}")
         # Non-critical for dev if tables exist, but good to log.
