@@ -13,9 +13,10 @@ interface Message {
 interface ShapingChatProps {
     initialQuery: string;
     onUpdate: (query: string) => void; // Callback to trigger re-diagnosis
+    sessionId?: number | null;
 }
 
-export default function ShapingChat({ initialQuery, onUpdate }: ShapingChatProps) {
+export default function ShapingChat({ initialQuery, onUpdate, sessionId }: ShapingChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isThinking, setIsThinking] = useState(false);
@@ -24,23 +25,28 @@ export default function ShapingChat({ initialQuery, onUpdate }: ShapingChatProps
     // Initial Load
     useEffect(() => {
         if (initialQuery && messages.length === 0) {
+            // If we have a sessionId, we *should* fetch history. For now, we assume just started.
             const userMsg: Message = { id: "1", role: "user", content: initialQuery, timestamp: Date.now() };
             setMessages([userMsg]);
 
-            // Simulate System Thinking & Reply
+            // Mock System Reply for immediate feedback, but in reality backend handles this on /start
+            // If the start endpoint returned a 'system_intro', we could show it.
+            // For now, let's just simulate the first "thinking" if we haven't fetched history.
             setIsThinking(true);
             setTimeout(() => {
-                const sysMsg: Message = {
-                    id: "2",
-                    role: "system",
-                    content: "I'm analyzing your request. It sounds like you want to improve data quality. key entities identified: 'Patients', 'Insurance'. Is this for a specific department?",
-                    timestamp: Date.now()
-                };
-                setMessages(prev => [...prev, sysMsg]);
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        id: "2",
+                        role: "system",
+                        content: `I've started session #${sessionId || '?'}. I'm analyzing '${initialQuery}'...`,
+                        timestamp: Date.now()
+                    }
+                ]);
                 setIsThinking(false);
-            }, 1500);
+            }, 1000);
         }
-    }, [initialQuery]);
+    }, [initialQuery, sessionId]);
 
     // Auto-scroll
     useEffect(() => {
@@ -49,7 +55,7 @@ export default function ShapingChat({ initialQuery, onUpdate }: ShapingChatProps
         }
     }, [messages, isThinking]);
 
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!input.trim()) return;
 
         const userMsg: Message = { id: Date.now().toString(), role: "user", content: input, timestamp: Date.now() };
@@ -57,20 +63,45 @@ export default function ShapingChat({ initialQuery, onUpdate }: ShapingChatProps
         setInput("");
         setIsThinking(true);
 
-        // Notify parent to re-run diagnosis with new context
+        // Notify parent (for sidebar re-rank)
         onUpdate(input);
 
-        // Mock System Reply
-        setTimeout(() => {
-            const sysMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "system",
-                content: "Understood. Refining metrics based on that...",
-                timestamp: Date.now()
-            };
-            setMessages(prev => [...prev, sysMsg]);
-            setIsThinking(false);
-        }, 1200);
+        // PERSISTENCE: Call Backend
+        if (sessionId) {
+            try {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}/chat`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: input, user_id: "user_123" }),
+                });
+                const data = await res.json();
+
+                const sysMsg: Message = {
+                    id: (Date.now() + 1).toString(),
+                    role: "system",
+                    content: data.reply,
+                    timestamp: Date.now()
+                };
+                setMessages(prev => [...prev, sysMsg]);
+            } catch (e) {
+                console.error("Chat failed", e);
+                // Fallback
+            }
+        } else {
+            // Mock fallback if no session
+            setTimeout(() => {
+                const sysMsg: Message = {
+                    id: (Date.now() + 1).toString(),
+                    role: "system",
+                    content: "Session ID missing, but I hear you. (Mock)",
+                    timestamp: Date.now()
+                };
+                setMessages(prev => [...prev, sysMsg]);
+            }, 1000);
+        }
+
+        setIsThinking(false);
     };
 
     return (

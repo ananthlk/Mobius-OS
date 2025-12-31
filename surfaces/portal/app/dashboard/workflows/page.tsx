@@ -5,6 +5,7 @@ import ToolPalette from "@/components/workflows/ToolPalette";
 import StepEditor from "@/components/workflows/StepEditor";
 import ProblemEntry from "@/components/workflows/ProblemEntry";
 import SolutionRail from "@/components/workflows/SolutionRail";
+import ShapingChat from "@/components/workflows/ShapingChat";
 
 interface Step {
     id: string;
@@ -51,17 +52,30 @@ export default function WorkflowBuilder() {
     const [goal, setGoal] = useState("");
     const [steps, setSteps] = useState<Step[]>([]);
     const [selectedSchemaMap, setSelectedSchemaMap] = useState<Record<string, any>>({});
-    const [searchQuery, setSearchQuery] = useState(""); // Add this back
+    const [searchQuery, setSearchQuery] = useState("");
+    const [currentSessionId, setCurrentSessionId] = useState<number | null>(null); // New State
 
     // Selection State
     const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
 
 
     // Handlers
-    const handleDiagnose = (results: any[], query: string) => { // Accept query
+    const handleDiagnose = (results: any[], query: string, sessionId?: number) => {
         setDiagnosticResults(results);
         setSearchQuery(query);
+        if (sessionId) setCurrentSessionId(sessionId);
         setViewMode("SELECTION");
+    };
+
+    const handleShapingUpdate = (newQuery: string) => {
+        // Mock: Reshuffle or adjust scores based on "new insight"
+        // In real backend, this would call /api/diagnose/refine
+        const shuffled = [...diagnosticResults].map(r => ({
+            ...r,
+            match_score: Math.random() * 0.5 + 0.4 // Randomize score to show "Thinking"
+        })).sort((a, b) => b.match_score - a.match_score);
+
+        setDiagnosticResults(shuffled);
     };
 
     const handleSelectSolution = (sol: any) => {
@@ -122,28 +136,7 @@ export default function WorkflowBuilder() {
                 </div>
             )}
 
-            import ShapingChat from "@/components/workflows/ShapingChat";
 
-// ... inside component ...
-
-    // Handlers
-    const handleDiagnose = (results: any[]) => {
-                setDiagnosticResults(results);
-            setViewMode("SELECTION"); // We reuse SELECTION mode name but it's now "SHAPING" view
-    };
-
-    const handleShapingUpdate = (newQuery: string) => {
-        // Mock: Reshuffle or adjust scores based on "new insight"
-        // In real backend, this would call /api/diagnose/refine
-        const shuffled = [...diagnosticResults].map(r => ({
-                ...r,
-                match_score: Math.random() * 0.5 + 0.4 // Randomize score to show "Thinking"
-        })).sort((a, b) => b.match_score - a.match_score);
-
-            setDiagnosticResults(shuffled);
-    };
-
-            // ... render ...
 
             {/* VIEW: SELECTION (SHAPING SPLIT VIEW) */}
             {viewMode === "SELECTION" && (
@@ -173,6 +166,7 @@ export default function WorkflowBuilder() {
                         <ShapingChat
                             initialQuery={searchQuery || "I have a problem..."}
                             onUpdate={handleShapingUpdate}
+                            sessionId={currentSessionId}
                         />
                     </div>
                 </div>

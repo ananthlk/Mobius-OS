@@ -13,7 +13,7 @@ export interface DiagnosticResult {
 }
 
 interface ProblemEntryProps {
-    onDiagnose: (results: DiagnosticResult[], query: string) => void;
+    onDiagnose: (results: DiagnosticResult[], query: string, sessionId?: number) => void;
 }
 
 export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
@@ -25,14 +25,16 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
         setLoading(true);
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            const res = await fetch(`${apiUrl}/api/workflows/diagnose`, {
+            // Call the stateful Shaping/Persistence endpoint
+            const res = await fetch(`${apiUrl}/api/workflows/shaping/start`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query }),
+                body: JSON.stringify({ query, user_id: "user_123" }), // Mock user_id for now
             });
             const data = await res.json();
-            // Assuming data.candidates is the list
-            onDiagnose(data.candidates || [], query);
+
+            // Pass session_id up to the parent
+            onDiagnose(data.candidates || [], query, data.session_id);
         } catch (e) {
             console.error("Diagnosis failed", e);
             // Mock fallback for demo if backend not ready

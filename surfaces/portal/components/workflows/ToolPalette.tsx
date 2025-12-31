@@ -13,7 +13,8 @@ export default function ToolPalette({ onSelectTool }: { onSelectTool: (tool: Too
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch("http://localhost:8000/api/workflows/tools")
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        fetch(`${apiUrl}/api/workflows/tools`)
             .then((res) => res.json())
             .then((data) => {
                 setTools(data);
