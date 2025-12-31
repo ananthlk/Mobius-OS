@@ -12,7 +12,7 @@ export default function SolutionRail({ solutions, selectedId, onSelect }: Soluti
     return (
         <div className="w-80 bg-[#F9FAFB] border-r border-[#E5E7EB] flex flex-col h-full z-20">
             <div className="p-6 border-b border-[#E5E7EB]">
-                <h2 className="text-[#6B7280] font-medium text-xs tracking-[0.2em] mb-4">DIAGNOSTIC RESULTS</h2>
+                <h2 className="text-[#6B7280] font-medium text-xs tracking-[0.2em] mb-4">WORKFLOWS MATCHING YOUR NEEDS</h2>
                 <div className="text-xs text-[#9CA3AF] font-light">
                     Found {solutions.length} potential workflows based on your problem statement.
                 </div>
