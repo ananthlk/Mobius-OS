@@ -14,6 +14,16 @@ interface Provider {
 
 export default function LLMAdminPage() {
     const [providers, setProviders] = useState<Provider[]>([]);
+    // Key Management State
+    const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+    const [keys, setKeys] = useState<{ key: string; value: string }[]>([]);
+
+    // Vertex specific defaults
+    const [vProjectId, setVProjectId] = useState("");
+    const [vLocation, setVLocation] = useState("us-central1");
+    // Generic default
+    const [apiKey, setApiKey] = useState("");
+
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
 
@@ -61,6 +71,45 @@ export default function LLMAdminPage() {
         } catch (e) {
             alert("Failed to create provider");
         }
+    };
+
+    const openKeyModal = (p: Provider) => {
+        setSelectedProvider(p);
+        // Reset fields
+        setVProjectId("");
+        setVLocation("us-central1");
+        setApiKey("");
+    };
+
+    const handleSaveSecret = async (key: string, value: string) => {
+        if (!selectedProvider) return;
+        try {
+            await fetch(`${API_URL}/api/admin/ai/secrets`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    provider_id: selectedProvider.id,
+                    key: key,
+                    value: value,
+                    is_secret: key !== "location" // location is public config
+                }),
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const handleSubmitKeys = async () => {
+        if (!selectedProvider) return;
+
+        if (selectedProvider.provider_type === "vertex") {
+            if (vProjectId) await handleSaveSecret("project_id", vProjectId);
+            if (vLocation) await handleSaveSecret("location", vLocation);
+        } else {
+            if (apiKey) await handleSaveSecret("api_key", apiKey);
+        }
+        alert("Configuration Saved!");
+        setSelectedProvider(null);
     };
 
     return (
@@ -153,7 +202,10 @@ export default function LLMAdminPage() {
                                         <CheckCircle size={14} />
                                         Active
                                     </div>
-                                    <button className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                                    <button
+                                        onClick={() => openKeyModal(provider)}
+                                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                    >
                                         Manage Keys
                                     </button>
                                 </div>
@@ -215,6 +267,69 @@ export default function LLMAdminPage() {
                                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium"
                             >
                                 Create Provider
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Key Management Modal */}
+            {selectedProvider && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-700">
+                        <h2 className="text-xl font-bold mb-1">Configure {selectedProvider.name}</h2>
+                        <p className="text-sm text-slate-500 mb-6">Secrets are encrypted before storage (AES-256).</p>
+
+                        <div className="space-y-4">
+                            {selectedProvider.provider_type === "vertex" ? (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Google Cloud Project ID</label>
+                                        <input
+                                            type="text"
+                                            value={vProjectId}
+                                            onChange={(e) => setVProjectId(e.target.value)}
+                                            placeholder="mobiusos-482817"
+                                            className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Region (Location)</label>
+                                        <input
+                                            type="text"
+                                            value={vLocation}
+                                            onChange={(e) => setVLocation(e.target.value)}
+                                            placeholder="us-central1"
+                                            className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent"
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">API Key</label>
+                                    <input
+                                        type="password"
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        placeholder="sk-..."
+                                        className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent"
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button
+                                onClick={() => setSelectedProvider(null)}
+                                className="px-4 py-2 text-slate-500 hover:text-slate-700"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSubmitKeys}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"
+                            >
+                                Save Configuration
                             </button>
                         </div>
                     </div>
