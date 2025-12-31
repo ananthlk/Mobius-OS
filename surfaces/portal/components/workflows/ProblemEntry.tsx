@@ -13,7 +13,7 @@ export interface DiagnosticResult {
 }
 
 interface ProblemEntryProps {
-    onDiagnose: (results: DiagnosticResult[]) => void;
+    onDiagnose: (results: DiagnosticResult[], query: string) => void;
 }
 
 export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
@@ -32,7 +32,7 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
             });
             const data = await res.json();
             // Assuming data.candidates is the list
-            onDiagnose(data.candidates || []);
+            onDiagnose(data.candidates || [], query);
         } catch (e) {
             console.error("Diagnosis failed", e);
             // Mock fallback for demo if backend not ready
@@ -53,7 +53,7 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
                     reasoning: "Mention of 'risk' but intent unclear.",
                     origin: "standard"
                 }
-            ]);
+            ], query);
         } finally {
             setLoading(false);
         }

@@ -51,14 +51,16 @@ export default function WorkflowBuilder() {
     const [goal, setGoal] = useState("");
     const [steps, setSteps] = useState<Step[]>([]);
     const [selectedSchemaMap, setSelectedSchemaMap] = useState<Record<string, any>>({});
+    const [searchQuery, setSearchQuery] = useState(""); // Add this back
 
     // Selection State
     const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
 
 
     // Handlers
-    const handleDiagnose = (results: any[]) => {
+    const handleDiagnose = (results: any[], query: string) => { // Accept query
         setDiagnosticResults(results);
+        setSearchQuery(query);
         setViewMode("SELECTION");
     };
 
@@ -120,59 +122,62 @@ export default function WorkflowBuilder() {
                 </div>
             )}
 
-            {/* VIEW: SELECTION */}
+            import ShapingChat from "@/components/workflows/ShapingChat";
+
+// ... inside component ...
+
+    // Handlers
+    const handleDiagnose = (results: any[]) => {
+                setDiagnosticResults(results);
+            setViewMode("SELECTION"); // We reuse SELECTION mode name but it's now "SHAPING" view
+    };
+
+    const handleShapingUpdate = (newQuery: string) => {
+        // Mock: Reshuffle or adjust scores based on "new insight"
+        // In real backend, this would call /api/diagnose/refine
+        const shuffled = [...diagnosticResults].map(r => ({
+                ...r,
+                match_score: Math.random() * 0.5 + 0.4 // Randomize score to show "Thinking"
+        })).sort((a, b) => b.match_score - a.match_score);
+
+            setDiagnosticResults(shuffled);
+    };
+
+            // ... render ...
+
+            {/* VIEW: SELECTION (SHAPING SPLIT VIEW) */}
             {viewMode === "SELECTION" && (
-                <div className="w-full h-full flex relative z-10">
-                    <SolutionRail
-                        solutions={diagnosticResults}
-                        selectedId={selectedSolutionId}
-                        onSelect={handleSelectSolution}
-                    />
+                <div className="w-full h-full flex relative z-10 bg-[#F9FAFB] p-6 gap-6">
+                    {/* Left Rail: Dynamic Solutions */}
+                    <div className="w-[340px] flex-shrink-0 flex flex-col h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <SolutionRail
+                            solutions={diagnosticResults}
+                            selectedId={selectedSolutionId}
+                            onSelect={handleSelectSolution}
+                        />
+                        {/* Adopt Button at bottom of rail */}
+                        <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+                            <button
+                                onClick={handleAdopt}
+                                disabled={!selectedSolutionId}
+                                className="w-full bg-[#1A1A1A] text-white py-3 rounded-xl font-semibold hover:bg-black transition-colors shadow-lg shadow-black/5 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                            >
+                                Adopt Selected Workflow
+                            </button>
+                        </div>
+                    </div>
 
-                    {/* Preview Area (Right Rail) */}
-                    <div className="flex-1 flex flex-col items-center justify-center p-12 bg-white">
-                        {/* Grid Background */}
-                        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-[0.2] pointer-events-none"></div>
-
-                        {selectedSolutionId ? (
-                            <div className="max-w-2xl w-full bg-white border border-[#E5E7EB] rounded-2xl p-8 shadow-2xl animate-in zoom-in-95 duration-300 relative z-10">
-                                <div className="mb-6">
-                                    <h2 className="text-2xl font-light text-[#1A1A1A] mb-2">{MOCK_SOLUTIONS.find(s => s.id === selectedSolutionId)?.name}</h2>
-                                    <p className="text-[#6B7280]">{MOCK_SOLUTIONS.find(s => s.id === selectedSolutionId)?.description}</p>
-                                </div>
-
-                                <div className="space-y-3 mb-8">
-                                    <div className="text-xs uppercase tracking-widest text-[#9CA3AF] font-bold">Workflow Steps</div>
-                                    <div className="space-y-2">
-                                        {MOCK_SOLUTIONS.find(s => s.id === selectedSolutionId)?.steps.map((step, idx) => (
-                                            <div key={idx} className="flex items-center gap-3 p-3 bg-[#F9FAFB] rounded-lg border border-[#E5E7EB]">
-                                                <div className="w-6 h-6 rounded bg-blue-100 flex items-center justify-center text-[10px] text-blue-600 font-mono font-bold">{idx + 1}</div>
-                                                <span className="text-sm text-[#4B5563] font-medium">{step.tool_name}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-4">
-                                    <button
-                                        onClick={handleAdopt}
-                                        className="flex-1 bg-[#1A1A1A] text-white py-3 rounded-xl font-semibold hover:bg-black transition-colors shadow-lg shadow-black/5"
-                                    >
-                                        Adopt this Workflow
-                                    </button>
-                                    <button className="px-6 py-3 rounded-xl border border-[#E5E7EB] text-[#4B5563] hover:bg-[#F9FAFB] transition-colors font-medium">
-                                        Customize
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-center text-gray-400">
-                                <p>Select a solution to preview</p>
-                            </div>
-                        )}
+                    {/* Main Area: Shaping Chat */}
+                    <div className="flex-1 h-full min-w-0">
+                        {/* Using the original query as seed */}
+                        <ShapingChat
+                            initialQuery={searchQuery || "I have a problem..."}
+                            onUpdate={handleShapingUpdate}
+                        />
                     </div>
                 </div>
             )}
+
 
             {/* VIEW: EDITOR */}
             {viewMode === "EDITOR" && (
