@@ -73,7 +73,7 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
     ];
 
     return (
-        <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto animate-in fade-in zoom-in-95 duration-500">
+        <div className="flex flex-col items-center justify-center h-full max-w-lg mx-auto animate-in fade-in zoom-in-95 duration-500">
             <h1 className="text-3xl font-light text-[#1A1A1A] mb-8 tracking-tight text-center">
                 What problem <br />
                 <span className="text-[#6B7280]">are we solving today?</span>
