@@ -95,7 +95,7 @@ class LLMGateway:
         vertexai.init(project=project_id, location=location)
         
         # Default Model
-        target_model = model_id or "gemini-1.5-pro" 
+        target_model = model_id or "gemini-2.5-flash" 
         model = GenerativeModel(target_model)
         
         # Convert Messages (OpenAI format -> Vertex format)
@@ -116,7 +116,7 @@ class LLMGateway:
         
         return {
             "content": response.text,
-            "raw": response.to_dict(),
+            "raw": str(response),
             "provider": "vertex",
             "model": target_model
         }
