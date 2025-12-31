@@ -90,6 +90,7 @@ async def run_recipe_endpoint(name: str, req: RunRecipeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 from nexus.brains.diagnosis import DiagnosisBrain
+from nexus.modules.shaping_manager import shaping_manager
 
 @router.post("/diagnose")
 async def diagnose_problem(req: Dict[str, str]):
@@ -101,3 +102,50 @@ async def diagnose_problem(req: Dict[str, str]):
     query = req.get("query", "")
     candidates = await brain.diagnose(query)
     return {"candidates": candidates}
+
+# --- Shaping Session Endpoints (Stateful) ---
+
+class StartShapingRequest(BaseModel):
+    query: str
+    user_id: str = "user_default" # Mock auth for now
+
+class ChatRequest(BaseModel):
+    message: str
+    user_id: str = "user_default"
+
+@router.post("/shaping/start")
+async def start_shaping(req: StartShapingRequest):
+    """
+    Starts a new shaping session OR matches to existing workflows (Diagnosis).
+    Returns session_id and candidates.
+    """
+    # 1. Start Session (Persistence)
+    session_id = await shaping_manager.create_session(req.user_id, req.query)
+    
+    # 2. Diagnose (Logic)
+    brain = DiagnosisBrain()
+    candidates = await brain.diagnose(req.query)
+    
+    return {
+        "session_id": session_id,
+        "candidates": candidates,
+        # Mock System Intro
+        "system_intro": f"I've initialized session #{session_id}. Based on '{req.query}', here are some recommended workflows."
+    }
+
+@router.post("/shaping/{session_id}/chat")
+async def shaping_chat(session_id: int, req: ChatRequest):
+    """
+    Handles chat interaction within a specific shaping session.
+    """
+    # 1. Log User Message
+    await shaping_manager.append_message(session_id, "user", req.message)
+    
+    # 2. Simulate Brain Thinking (In V2, LLM call happens here)
+    # For now, we return a mock refinement message
+    reply_text = f"I've noted: '{req.message}'. adjusting the parameters..."
+    
+    # 3. Log System Reply
+    await shaping_manager.append_message(session_id, "system", reply_text)
+    
+    return {"reply": reply_text}
