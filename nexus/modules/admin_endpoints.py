@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from nexus.modules.config_manager import config_manager
+import logging
+
+logger = logging.getLogger("nexus.admin")
 
 router = APIRouter(prefix="/api/admin/ai", tags=["admin_ai"])
 
