@@ -30,7 +30,14 @@ export default function DashboardLayout({
                 console.error("Failed to fetch activity", e);
             }
         };
+
         fetchActivity();
+
+        // Listen for refresh events (e.g., from ProblemEntry)
+        const handleRefresh = () => fetchActivity();
+        window.addEventListener('refresh-sidebar', handleRefresh);
+
+        return () => window.removeEventListener('refresh-sidebar', handleRefresh);
     }, [pathname]); // Re-fetch when path changes
 
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -87,7 +94,11 @@ export default function DashboardLayout({
                     ))}
                 </nav>
 
-                <div className="mt-auto flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-max">
+                <div className="mt-auto mb-2 px-4">
+                    <ModelBadge pathname={pathname} />
+                </div>
+
+                <div className="flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-max">
                     {session?.user?.image ? (
                         <img src={session.user.image} className="w-8 h-8 rounded-full" />
                     ) : (
@@ -112,8 +123,50 @@ export default function DashboardLayout({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                     </svg>
                 </button>
+
                 {children}
             </main>
+        </div>
+    );
+}
+
+function ModelBadge({ pathname }: { pathname: string }) {
+    const [modelInfo, setModelInfo] = useState<{ model_id: string; source: string } | null>(null);
+
+    useEffect(() => {
+        const fetchModel = async () => {
+            let module = 'global';
+            if (pathname.startsWith('/dashboard/chat')) module = 'chat';
+            else if (pathname.startsWith('/dashboard/workflows')) module = 'workflow';
+            // else global/default
+
+            try {
+                const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${API_URL}/api/admin/ai/resolve?module=${module}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setModelInfo(data);
+                }
+            } catch (e) {
+                console.error("Failed to resolve model", e);
+            }
+        };
+        fetchModel();
+    }, [pathname]);
+
+    if (!modelInfo) return null;
+
+    let color = "bg-slate-100 text-slate-600 border-slate-200";
+    if (modelInfo.source.includes("user")) color = "bg-purple-50 text-purple-600 border-purple-200";
+    if (modelInfo.source.includes("module")) color = "bg-blue-50 text-blue-600 border-blue-200";
+
+    return (
+        <div className="flex flex-col gap-1 p-3 rounded-xl bg-white border border-slate-100 shadow-sm" title={`Source: ${modelInfo.source}`}>
+            <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                <div className={`w-1.5 h-1.5 rounded-full ${modelInfo.source.includes("fail") ? "bg-red-500" : "bg-green-500"}`}></div>
+                Active Model
+            </div>
+            <div className="text-xs font-semibold text-slate-700 truncate">{modelInfo.model_id}</div>
         </div>
     );
 }

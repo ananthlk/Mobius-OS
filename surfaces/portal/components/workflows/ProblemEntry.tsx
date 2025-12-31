@@ -35,6 +35,9 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
 
             // Pass session_id up to the parent
             onDiagnose(data.candidates || [], query, data.session_id);
+
+            // Trigger Sidebar Refresh
+            window.dispatchEvent(new Event('refresh-sidebar'));
         } catch (e) {
             console.error("Diagnosis failed", e);
             // Mock fallback for demo if backend not ready

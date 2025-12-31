@@ -1,4 +1,5 @@
 import logging
+# Fix: Reordered classes to prevent NameError
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional

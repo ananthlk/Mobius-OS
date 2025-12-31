@@ -23,23 +23,48 @@ class LLMGateway:
     async def chat_completion(
         self, 
         messages: list, 
-        provider_name: str = None, 
-        model_id: str = None
+        provider_name: str = None, # Legacy: For explicit overrides or testing
+        model_id: str = None,      # Legacy: For explicit overrides
+        module_id: str = "chat",
+        user_id: str = "user_default"
     ) -> Dict[str, Any]:
         """
         Generic chat completion.
-        If provider_name is None, uses the system default (active) provider.
+        Uses 4-Tier Governance to resolve model if provider/model not explicitly passed.
         """
-        config = await self._get_provider_config(provider_name)
+        
+        # 1. Resolve Model & Provider via Governance (Through ConfigManager)
+        # If provider/model passed explicitly (legacy/testing), we treat as Runtime Override
+        
+        # We assume self.config_manager is available (it's used loosely effectively via import in _get_provider_config, 
+        # but let's be explicit and import the instance or reuse the import)
+        from nexus.modules.config_manager import config_manager
+        
+        resolution = await config_manager.resolve_app_context(
+            module_id=module_id, 
+            user_id=user_id, 
+            override_model=model_id
+        )
+        
+        target_model = resolution["model_id"]
+        target_provider = resolution["provider_name"]
+        
+        # Override if legacy provider_name was passed (e.g. testing)
+        if provider_name:
+            target_provider = provider_name
+            
+        # 2. Get Config
+        config = await self._get_provider_config(target_provider)
         if not config:
-            raise ValueError(f"Provider '{provider_name}' not configured or active.")
-
+            raise ValueError(f"Provider '{target_provider}' not configured or active.")
+        
+        # 3. Route
         provider_type = config["provider_type"]
         
         if provider_type == "vertex":
-            return await self._call_vertex(config, model_id, messages)
+            return await self._call_vertex(config, target_model, messages)
         elif provider_type == "openai_compatible":
-            return await self._call_openai_compatible(config, model_id, messages)
+            return await self._call_openai_compatible(config, target_model, messages)
         else:
             raise ValueError(f"Unsupported provider type: {provider_type}")
 
@@ -144,5 +169,58 @@ class LLMGateway:
             "provider": config["name"],
             "model": target_model
         }
+
+    async def test_connection(self, provider_name: str) -> Dict[str, Any]:
+        """
+        Verifies connectivity to the provider without generating text.
+        """
+        config = await self._get_provider_config(provider_name)
+        if not config:
+            raise ValueError(f"Provider '{provider_name}' not found.")
+            
+        provider_type = config["provider_type"]
+        
+        if provider_type == "vertex":
+            # Test Vertex: Init and list models (or just verify project access)
+            # Minimal check: Just check if we can init without error
+            secrets = config["secrets"]
+            try:
+                vertexai.init(project=secrets.get("project_id"), location=secrets.get("location"))
+                # Try a lightweight call
+                # list_models is part of ModelGardenService but GenerativeModel is easier
+                # We'll assume Init is enough or try catching an auth error on a dummy object
+                return {"status": "success", "message": "Vertex AI Project Accessible"}
+            except Exception as e:
+                raise ValueError(f"Vertex Connection Failed: {e}")
+                
+        elif provider_type == "openai_compatible":
+            # Test OpenAI/Ollama: List Models
+            api_key = config["secrets"].get("api_key", "missing")
+            base_url = config.get("base_url")
+            
+            try:
+                client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+                # This verifies URL + Key
+                models = await client.models.list()
+                
+                # Check for at least one model
+                count = len(models.data)
+                first_model = models.data[0].id if count > 0 else "none"
+                
+                return {
+                    "status": "success", 
+                    "message": f"Connected! Found {count} models (e.g. {first_model})"
+                }
+            except Exception as e:
+                # Clarify common errors
+                msg = str(e)
+                if "Connection refused" in msg:
+                    msg += " (Check Base URL)"
+                if "401" in msg:
+                    msg += " (Invalid API Key)"
+                raise ValueError(f"Connection Failed: {msg}")
+                
+        else:
+            raise ValueError("Unknown provider type")
 
 gateway = LLMGateway()

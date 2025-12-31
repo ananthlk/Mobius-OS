@@ -1,4 +1,7 @@
 import logging
+from typing import List, Optional, Dict, Any
+import json
+from nexus.modules.database import database
 
 logger = logging.getLogger("nexus.shaping")
 
@@ -34,14 +37,6 @@ class ShapingManager:
         await self._log_activity(user_id, session_id, initial_query)
         
         return session_id
-    
-    # ... append_message (no changes needed, inferred from workflow logs) ...
-
-    async def _log_activity(self, user_id: str, session_id: int, query: str):
-        # ... logic ...
-        logger.debug(f"Logged user activity for session {session_id}")
-        # ... db insert ...
-
     async def append_message(self, session_id: int, role: str, content: str) -> None:
         """
         Appends a message to the session transcript.

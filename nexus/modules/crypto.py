@@ -12,10 +12,11 @@ if not MASTER_KEY_B64:
     print("WARNING: MOBIUS_MASTER_KEY not set. Generating a temporary one.")
     _key = AESGCM.generate_key(bit_length=256)
     MASTER_KEY = _key
-    print(f"Generated Temporary MASTER_KEY (Save this to .env): {base64.urlsafe_b64encode(_key).decode()}")
+    print(f"Generated Temporary MASTER_KEY: {base64.urlsafe_b64encode(_key).decode()[:5]}...")
 else:
     try:
         MASTER_KEY = base64.urlsafe_b64decode(MASTER_KEY_B64)
+        print(f"✅ Crypto Loaded MASTER_KEY: {MASTER_KEY_B64[:5]}...")
     except Exception as e:
         raise ValueError(f"Invalid MOBIUS_MASTER_KEY format: {e}")
 

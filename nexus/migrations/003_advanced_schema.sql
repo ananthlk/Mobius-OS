@@ -21,28 +21,12 @@ CREATE TABLE IF NOT EXISTS workflow_problem_identification (
 
 -- 3. Update Agent Recipes (The Solution) - Add new columns if they don't exist
 -- We use DO blocks for safe column additions in Postgres
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_recipes' AND column_name='problem_id') THEN
-        ALTER TABLE agent_recipes ADD COLUMN problem_id INTEGER REFERENCES problem_definitions(id);
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_recipes' AND column_name='channel') THEN
-        ALTER TABLE agent_recipes ADD COLUMN channel TEXT DEFAULT 'API'; -- 'API', 'VOICE', 'EMAIL'
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_recipes' AND column_name='metadata') THEN
-        ALTER TABLE agent_recipes ADD COLUMN metadata JSONB;
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_recipes' AND column_name='created_by') THEN
-        ALTER TABLE agent_recipes ADD COLUMN created_by TEXT;
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_recipes' AND column_name='is_active') THEN
-        ALTER TABLE agent_recipes ADD COLUMN is_active BOOLEAN DEFAULT TRUE;
-    END IF;
-END $$;
+-- 3. Update Agent Recipes (The Solution) - Add new columns if they don't exist
+ALTER TABLE agent_recipes ADD COLUMN IF NOT EXISTS problem_id INTEGER REFERENCES problem_definitions(id);
+ALTER TABLE agent_recipes ADD COLUMN IF NOT EXISTS channel TEXT DEFAULT 'API';
+ALTER TABLE agent_recipes ADD COLUMN IF NOT EXISTS metadata JSONB;
+ALTER TABLE agent_recipes ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE agent_recipes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
 
 -- 4. Workflow Executions (The History)
 CREATE TABLE IF NOT EXISTS workflow_executions (

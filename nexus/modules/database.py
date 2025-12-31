@@ -79,4 +79,53 @@ async def init_db():
         print("Migration 004 (AI Gateway) applied.")
     except Exception as e:
          print(f"Migration 004 Error: {e}")
-        # Non-critical for dev if tables exist, but good to log.
+
+    # 005: LLM Governance
+    try:
+        sql = read_migration("005_llm_governance.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 005 (Governance) applied.")
+    except Exception as e:
+         print(f"Migration 005 Error: {e}")
+
+    # 006: System Audit
+    try:
+        sql = read_migration("006_system_audit.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 006 (Audit) applied.")
+    except Exception as e:
+         print(f"Migration 006 Error: {e}")
+
+    # 007: Latency Metrics
+    try:
+        sql = read_migration("007_model_latency.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 007 (Latency) applied.")
+    except Exception as e:
+         print(f"Migration 007 Error: {e}")
+
+    # 008: Model Recommendation
+    try:
+        sql = read_migration("008_model_recommendation.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 008 (Recommendation) applied.")
+    except Exception as e:
+         print(f"Migration 008 Error: {e}")
+
+    # 009: Fix Vertex IDs
+    try:
+        sql = read_migration("009_fix_vertex_ids.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 009 (Vertex Fix) applied.")
+    except Exception as e:
+         print(f"Migration 009 Error: {e}")

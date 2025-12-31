@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Plus, Shield, CheckCircle, Key, Server } from "lucide-react";
+import { Plus, Shield, CheckCircle, Key, Server, RefreshCw, Power } from "lucide-react";
+import GovernanceBoard from "./GovernanceBoard";
 
 // Types
 interface Provider {
@@ -12,8 +13,164 @@ interface Provider {
     is_active: boolean;
 }
 
+const ProviderCard = ({
+    provider,
+    onTest,
+    onManage,
+    onDelete,
+    onBenchmark,
+    onToggleModel,
+    catalog
+}: {
+    provider: Provider;
+    onTest: (p: Provider) => void;
+    onManage: (p: Provider) => void;
+    onDelete: (p: Provider) => void;
+    onBenchmark: (modelId: number) => void;
+    onToggleModel: (modelId: number, active: boolean) => void;
+    catalog: any[];
+}) => {
+    const [expanded, setExpanded] = useState(false);
+
+    // Find models for this provider
+    const providerCatalog = catalog.find(c => c.name === provider.name);
+    const models = providerCatalog ? providerCatalog.models : [];
+
+    const getLatencyIcon = (tier: string) => {
+        switch (tier) {
+            case "fast": return <span className="text-yellow-500">⚡</span>;
+            case "balanced": return <span className="text-blue-500">⚖️</span>;
+            default: return <span className="text-purple-500">🧠</span>;
+        }
+    };
+
+    return (
+        <div className="group rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-500 transition-all shadow-sm overflow-hidden">
+            <div className="p-5 flex justify-between items-start">
+                <div className="flex gap-4">
+                    <div className={`p-3 rounded-lg ${provider.provider_type === 'vertex' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
+                        <Server size={20} />
+                    </div>
+                    <div>
+                        <h3 className="font-semibold text-lg">{provider.name}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500">
+                                {provider.provider_type}
+                            </span>
+                            {provider.base_url && (
+                                <span className="text-xs text-slate-400 font-mono">{provider.base_url}</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${provider.is_active ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400' : 'bg-gray-100 text-gray-500'}`}>
+                        <CheckCircle size={14} />
+                        {provider.is_active ? 'Connected' : 'Inactive'}
+                    </div>
+
+                    <button onClick={() => onTest(provider)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-all" title="Test Connection">
+                        <CheckCircle size={18} />
+                    </button>
+                    <button onClick={() => onManage(provider)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="Manage Secrets">
+                        <Key size={18} />
+                    </button>
+                    <button onClick={() => onDelete(provider)} className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg border border-transparent hover:border-red-200 transition-all" title="Delete Provider">
+                        <Plus size={18} className="rotate-45" /> {/* Reuse Plus as Close/Delete */}
+                    </button>
+                </div>
+            </div>
+
+            {/* Inventory Toggle */}
+            <div
+                className="px-5 py-2 bg-slate-50 dark:bg-slate-900/30 border-t border-slate-100 dark:border-slate-700/50 flex justify-between items-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                onClick={() => setExpanded(!expanded)}
+            >
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Inventory ({models.length} Models)
+                </span>
+                <span className="text-xs text-indigo-500 font-medium">
+                    {expanded ? "Hide Models" : "View Models"}
+                </span>
+            </div>
+
+            {/* Expandable Inventory */}
+            {expanded && (
+                <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
+                    <div className="grid grid-cols-[2fr_1fr_1fr_1fr_0.5fr] px-6 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700/50">
+                        <span>Model Name</span>
+                        <span>Latency</span>
+                        <span>Input Cost</span>
+                        <span>Output Cost</span>
+                        <span className="text-right">Action</span>
+                    </div>
+                    {models.length > 0 ? models.map((m: any) => (
+                        <div key={m.id} className={`grid grid-cols-[2fr_1fr_1fr_1fr_0.5fr] px-6 py-3 text-sm border-b border-slate-100 dark:border-slate-700/50 hover:bg-white dark:hover:bg-slate-800 transition-colors ${m.is_active ? '' : 'opacity-60 bg-slate-50 dark:bg-slate-900/40'}`}>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <div className={`font-medium ${m.is_recommended ? 'text-slate-700 dark:text-slate-200' : 'text-slate-500 dark:text-slate-500'}`}>{m.display_name}</div>
+                                    {m.is_recommended && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium">
+                                            Verified {m.last_verified_at ? new Date(m.last_verified_at).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
+                                        </span>
+                                    )}
+                                    {!m.is_active && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 font-medium">Inactive</span>
+                                    )}
+                                </div>
+                                <div className="font-mono text-xs text-slate-400">{m.model_id}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {m.is_active ? getLatencyIcon(m.latency_tier) : <span className="grayscale opacity-50">{getLatencyIcon(m.latency_tier)}</span>}
+                                <span className="capitalize text-slate-500">
+                                    {m.last_latency_ms ? `${m.last_latency_ms} ms` : m.latency_tier}
+                                </span>
+                            </div>
+                            <div className="font-mono text-slate-500">${m.input_cost_per_1k}/1k</div>
+                            <div className="font-mono text-slate-500">${m.output_cost_per_1k}/1k</div>
+                            <div className="flex justify-end gap-2">
+                                {m.is_active ? (
+                                    <>
+                                        <button
+                                            onClick={() => onBenchmark(m.id)}
+                                            className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                                            title="Benchmark Latency"
+                                        >
+                                            <RefreshCw size={14} />
+                                        </button>
+                                        <button
+                                            onClick={() => onToggleModel(m.id, false)}
+                                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                            title="Deactivate Model"
+                                        >
+                                            <Power size={14} />
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        onClick={() => onToggleModel(m.id, true)}
+                                        className="p-1.5 text-slate-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
+                                        title="Activate Model"
+                                    >
+                                        <Plus size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )) : (
+                        <div className="p-6 text-sm text-slate-400 italic text-center col-span-5">No models synced. Please reset defaults in Governance Board.</div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export default function LLMAdminPage() {
     const [providers, setProviders] = useState<Provider[]>([]);
+    const [catalog, setCatalog] = useState<any[]>([]);
+
     // Key Management State
     const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
     const [keys, setKeys] = useState<{ key: string; value: string }[]>([]);
@@ -34,22 +191,26 @@ export default function LLMAdminPage() {
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-    const fetchProviders = async () => {
+    const fetchData = async () => {
+        if (providers.length === 0) setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/admin/ai/providers`);
-            if (res.ok) {
-                const data = await res.json();
-                setProviders(data);
-            }
+            const [provRes, catRes] = await Promise.all([
+                fetch(`${API_URL}/api/admin/ai/providers`),
+                fetch(`${API_URL}/api/admin/ai/catalog`)
+            ]);
+
+            if (provRes.ok) setProviders(await provRes.json());
+            if (catRes.ok) setCatalog(await catRes.json());
+
         } catch (e) {
-            console.error("Failed to fetch providers", e);
+            console.error("Failed to fetch data", e);
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchProviders();
+        fetchData();
     }, []);
 
     const handleCreate = async () => {
@@ -65,11 +226,58 @@ export default function LLMAdminPage() {
             });
             if (res.ok) {
                 setShowAddModal(false);
-                fetchProviders();
+                fetchData();
                 setNewName("");
             }
         } catch (e) {
             alert("Failed to create provider");
+        }
+    };
+
+    const handleDelete = async (p: Provider) => {
+        if (!confirm(`Are you sure you want to delete ${p.name}? This will remove all associated models and configs.`)) return;
+
+        try {
+            const res = await fetch(`${API_URL}/api/admin/ai/providers/${p.id}`, {
+                method: "DELETE"
+            });
+            if (res.ok) {
+                fetchData();
+            } else {
+                alert("Failed to delete provider");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Delete failed");
+        }
+    };
+
+    const handleBenchmark = async (modelId: number) => {
+        try {
+            const res = await fetch(`${API_URL}/api/admin/ai/models/${modelId}/benchmark`, {
+                method: "POST"
+            });
+            const data = await res.json();
+            if (data.status === "success") {
+                fetchData(); // Refresh to show new latency
+            } else {
+                alert("Benchmark failed");
+            }
+        } catch (e) {
+            alert("Benchmark failed: Network Error");
+        }
+    };
+
+    const handleToggle = async (modelId: number, active: boolean) => {
+        try {
+            await fetch(`${API_URL}/api/admin/ai/models/${modelId}/toggle`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ is_active: active })
+            });
+            fetchData();
+        } catch (e) {
+            alert("Toggle failed");
         }
     };
 
@@ -105,6 +313,7 @@ export default function LLMAdminPage() {
         if (selectedProvider.provider_type === "vertex") {
             if (vProjectId) await handleSaveSecret("project_id", vProjectId);
             if (vLocation) await handleSaveSecret("location", vLocation);
+            if (apiKey) await handleSaveSecret("api_key", apiKey);
         } else {
             if (apiKey) await handleSaveSecret("api_key", apiKey);
         }
@@ -187,56 +396,42 @@ export default function LLMAdminPage() {
                 </div>
             </div>
 
-            {/* Providers List */}
-            <div className="grid grid-cols-1 gap-4">
-                {loading ? (
-                    <div className="text-center py-12 text-slate-500">Loading Configuration...</div>
-                ) : (
-                    providers.map((provider) => (
-                        <div
-                            key={provider.id}
-                            className="group p-5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-500 transition-all shadow-sm"
-                        >
-                            <div className="flex justify-between items-start">
-                                <div className="flex gap-4">
-                                    <div className={`p-3 rounded-lg ${provider.provider_type === 'vertex' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
-                                        <Server size={20} />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-semibold text-lg">{provider.name}</h3>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500">
-                                                {provider.provider_type}
-                                            </span>
-                                            {provider.base_url && (
-                                                <span className="text-xs text-slate-400 font-mono">{provider.base_url}</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+            {/* 1. Connections Section */}
+            <section className="mb-12 border-b border-slate-200 dark:border-slate-800 pb-12">
+                <div className="mb-6">
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                        <Server className="text-blue-500" size={24} />
+                        Provider Connections
+                    </h2>
+                    <p className="text-slate-500 dark:text-slate-400 max-w-2xl">
+                        Configure the "Pipes". Add your API Keys and Project IDs here.
+                        Expand the cards to view the **Inventory** of available models.
+                    </p>
+                </div>
 
-                                <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-full text-sm font-medium">
-                                        <CheckCircle size={14} />
-                                        Active
-                                    </div>
-                                    <button
-                                        onClick={() => handleTestConnection(provider)}
-                                        className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors border border-blue-200 dark:border-blue-800"
-                                    >
-                                        Test
-                                    </button>
-                                    <button
-                                        onClick={() => openKeyModal(provider)}
-                                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors border border-slate-200 dark:border-slate-700"
-                                    >
-                                        Manage Keys
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ))
-                )}
+                <div className="grid grid-cols-1 gap-4">
+                    {loading ? (
+                        <div className="text-center py-12 text-slate-500">Loading Configuration...</div>
+                    ) : (
+                        providers.map((provider) => (
+                            <ProviderCard
+                                key={provider.id}
+                                provider={provider}
+                                onTest={handleTestConnection}
+                                onManage={openKeyModal}
+                                onDelete={handleDelete}
+                                onBenchmark={handleBenchmark}
+                                onToggleModel={handleToggle}
+                                catalog={catalog}
+                            />
+                        ))
+                    )}
+                </div>
+            </section>
+
+            {/* 2. Governance Board */}
+            <div className="mb-12">
+                <GovernanceBoard />
             </div>
 
             {/* Add Modal */}
@@ -326,6 +521,25 @@ export default function LLMAdminPage() {
                                             placeholder="us-central1"
                                             className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent"
                                         />
+                                    </div>
+                                    <div className="relative py-2">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <span className="w-full border-t border-slate-200 dark:border-slate-700" />
+                                        </div>
+                                        <div className="relative flex justify-center text-xs uppercase">
+                                            <span className="bg-white dark:bg-slate-800 px-2 text-slate-500">Or use AI Studio</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">API Key (Optional)</label>
+                                        <input
+                                            type="password"
+                                            value={apiKey}
+                                            onChange={(e) => setApiKey(e.target.value)}
+                                            placeholder="AQ..."
+                                            className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">Overrides Project ID for simple auth.</p>
                                     </div>
                                 </>
                             ) : (

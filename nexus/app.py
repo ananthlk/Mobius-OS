@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+from dotenv import load_dotenv
+load_dotenv() # Load env vars immediately
+
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from nexus.modules.spectacles_endpoints import router as spectacles_router
