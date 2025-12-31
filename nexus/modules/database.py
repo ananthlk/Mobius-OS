@@ -38,6 +38,10 @@ async def init_db():
         status TEXT DEFAULT 'ACTIVE',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    await database.execute(query=query_recipes)
+
     # Run Migrations
     
     # 001: Initial Schema
