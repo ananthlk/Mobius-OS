@@ -22,6 +22,7 @@ class AgentRecipe:
     goal: str
     steps: Dict[str, AgentStep] # Keyed by step_id
     start_step_id: str
+    metadata: Optional[Dict[str, Any]] = None # Success probability, avg runtime, etc.
 
 # --- The Factory Engine ---
 class NexusAgentFactory:

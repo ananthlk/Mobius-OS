@@ -89,3 +89,15 @@ async def run_recipe_endpoint(name: str, req: RunRecipeRequest):
         return {"status": "success", "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+from nexus.brains.diagnosis import DiagnosisBrain
+
+@router.post("/diagnose")
+async def diagnose_problem(req: Dict[str, str]):
+    """
+    Analyzes a user problem and returns ranked solutions.
+    Input: {"query": "..."}
+    """
+    brain = DiagnosisBrain()
+    query = req.get("query", "")
+    candidates = await brain.diagnose(query)
+    return {"candidates": candidates}
