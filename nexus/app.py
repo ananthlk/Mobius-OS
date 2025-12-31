@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     await connect_to_db()
     # Migration Note: active migrations should be triggered via /api/system/migrate in prod
     # But for dev convenience we can keep init_db or move to migrations entirely.
-    # await init_db() -> Replacing with proper migrations calls would be best practice, but keeping separate for now.
+    await init_db()
     await register_crm_recipes() # Now async
     yield
     # Shutdown
