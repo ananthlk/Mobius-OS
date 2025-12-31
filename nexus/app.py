@@ -41,6 +41,8 @@ app.include_router(spectacles_router, prefix="/api/spectacles", tags=["Spectacle
 app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
 app.include_router(workflows_router)
 app.include_router(system_router)
+from nexus.modules.activity import router as activity_router
+app.include_router(activity_router)
 
 @app.get("/")
 async def root():
