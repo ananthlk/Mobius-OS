@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { Send, Bot, Check, Plus, Search, Menu } from "lucide-react";
+import { Send, Bot, Check, Plus, Search, Menu, MessageSquare, GitBranch, Database, Settings } from "lucide-react";
 
 export default function Dashboard() {
     const { data: session } = useSession();
@@ -26,7 +26,8 @@ export default function Dashboard() {
         setLoading(true);
 
         try {
-            const response = await fetch("http://localhost:8000/api/portal/chat", {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const response = await fetch(`${apiUrl}/api/portal/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -55,21 +56,29 @@ export default function Dashboard() {
                     <span className="font-semibold text-xl text-[#5F6368]">Mobius</span>
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 shadow-sm mb-6 flex flex-col gap-2">
-                    <div className="flex items-center gap-3 text-[#1f1f1f] cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors">
-                        <Plus className="w-5 h-5 text-[#1a73e8]" />
-                        <span className="font-medium">New Chat</span>
+                {/* Modules Section */}
+                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2">Modules</div>
+                <nav className="space-y-1 mb-8">
+                    <div onClick={() => window.location.reload()} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-[#444746] hover:bg-white transition-colors">
+                        <MessageSquare className="w-5 h-5 text-[#1a73e8]" />
+                        <span className="text-sm font-medium">Chat</span>
                     </div>
-                    <a href="/dashboard/workflows/new" className="flex items-center gap-3 text-[#1f1f1f] cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors">
-                        <div className="w-5 h-5 rounded flex items-center justify-center bg-purple-100 text-purple-600">
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                        </div>
-                        <span className="font-medium">New Workflow</span>
+                    <a href="/dashboard/workflows/new" className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-[#444746] hover:bg-white transition-colors">
+                        <GitBranch className="w-5 h-5 text-purple-600" />
+                        <span className="text-sm font-medium">Workflows</span>
                     </a>
-                </div>
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-[#444746]/60 hover:bg-white transition-colors" title="Coming Soon">
+                        <Database className="w-5 h-5" />
+                        <span className="text-sm font-medium">Knowledge</span>
+                    </div>
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-[#444746]/60 hover:bg-white transition-colors" title="Coming Soon">
+                        <Settings className="w-5 h-5" />
+                        <span className="text-sm font-medium">Admin</span>
+                    </div>
+                </nav>
 
-                <nav className="flex-1 space-y-1">
-                    <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider">Recent</div>
+                <div className="px-4 py-2 text-xs font-semibold text-[#5F6368] uppercase tracking-wider mb-2">Recent Activity</div>
+                <nav className="flex-1 space-y-1 overflow-y-auto">
                     <SidebarItem label="Patient Intake: John Doe" active />
                     <SidebarItem label="Billing Inquiry #402" />
                     <SidebarItem label="Crisis Protocol Review" />
