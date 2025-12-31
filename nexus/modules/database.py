@@ -38,26 +38,41 @@ async def init_db():
         status TEXT DEFAULT 'ACTIVE',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    await database.execute(query=query_recipes)
+    # Run Migrations
+    
+    # 001: Initial Schema
+    with open("nexus/migrations/001_initial_schema.sql", "r") as f:
+        await database.execute(f.read())
+        
+    # 002: Seed Data
+    with open("nexus/migrations/002_seed_data.sql", "r") as f:
+        # Simple split by statement (naive)
+        sql = f.read()
+        statements = sql.split(";")
+        for stmt in statements:
+            if stmt.strip():
+                await database.execute(stmt)
 
-    # --- Advanced Schema Migration (003) ---
-    # In a real system, use Alembic/Flyway. Here we run the raw SQL for simplicity.
-    # We read the file content to ensure we are always in sync with the definition.
+    # 003: Advanced Schema (Split execution for DO blocks safety)
     try:
         with open("nexus/migrations/003_advanced_schema.sql", "r") as f:
-            migration_sql = f.read()
-            # Split by statement if needed, or execute block. 
-            # Databases usually support multi-statement execute if supported by driver.
-            # asyncpg usually requires execute per statement or script.
-            # We will split strictly by -- comments or simple heuristics if needed, 
-            # but usually execute() can handle a block if it's DDL. 
-            # If not, we might need a refined runner. 
-            # For now, let's try executing the block.
-            # NOTE: DO $$ blocks require safe execution.
-            await database.execute(query=migration_sql)
+            sql = f.read()
+            statements = sql.split(";")
+            for stmt in statements:
+                if stmt.strip():
+                    await database.execute(stmt)
     except Exception as e:
-        print(f"Migration Error: {e}")
-        # Non-critical for dev if tables exist, but good to log.
+        print(f"Migration 003 Warning: {e}")
 
+    # 004: AI Gateway (Split execution)
+    try:
+        with open("nexus/migrations/004_ai_gateway.sql", "r") as f:
+            sql = f.read()
+            statements = sql.split(";")
+            for stmt in statements:
+                if stmt.strip():
+                    await database.execute(stmt)
+        print("Migration 004 (AI Gateway) applied.")
+    except Exception as e:
+        print(f"Migration 004 Error: {e}")
+        # Non-critical for dev if tables exist, but good to log.
