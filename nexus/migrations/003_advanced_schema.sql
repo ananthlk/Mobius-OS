@@ -64,3 +64,14 @@ CREATE TABLE IF NOT EXISTS user_activity (
     resource_metadata JSONB, -- Cache title/icon
     last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 6. LLM Trace Logs (Observability)
+CREATE TABLE IF NOT EXISTS llm_trace_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id INTEGER REFERENCES workflow_problem_identification(id),
+    step_name TEXT, -- 'DIAGNOSIS', 'SHAPING_REPLY'
+    prompt_snapshot TEXT, -- Full prompt context
+    raw_completion JSONB, -- Raw LLM output
+    model_metadata JSONB, -- { "model": "gpt-4", "tokens": 100 }
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

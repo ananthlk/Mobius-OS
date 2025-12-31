@@ -141,11 +141,27 @@ async def shaping_chat(session_id: int, req: ChatRequest):
     # 1. Log User Message
     await shaping_manager.append_message(session_id, "user", req.message)
     
-    # 2. Simulate Brain Thinking (In V2, LLM call happens here)
-    # For now, we return a mock refinement message
-    reply_text = f"I've noted: '{req.message}'. adjusting the parameters..."
+    # 2. Simulate Brain Thinking (Mock LLM Call)
+    # In reality, this is where we'd call: response = await gpt4.generate(history)
+    mock_prompt = f"SYSTEM: You are a helpful assistant.\nUSER: {req.message}"
+    mock_raw_output = {
+        "choices": [{"text": f"I've noted: '{req.message}'. adjusting the parameters..."}],
+        "usage": {"total_tokens": 42}
+    }
+    reply_text = mock_raw_output["choices"][0]["text"]
     
-    # 3. Log System Reply
+    # 3. Log the Trace (The "Black Box" Log)
+    from nexus.modules.trace_manager import trace_manager
+    trace_id = await trace_manager.log_trace(
+        session_id=session_id,
+        step_name="SHAPING_REPLY",
+        prompt_snapshot=mock_prompt,
+        raw_completion=mock_raw_output,
+        model_metadata={"model": "gpt-4-mock", "latency": 150}
+    )
+    
+    # 4. Log System Reply with Trace Link
+    # We append the trace_id so the frontend (or admin UI) can link back to the raw log
     await shaping_manager.append_message(session_id, "system", reply_text)
     
-    return {"reply": reply_text}
+    return {"reply": reply_text, "trace_id": trace_id}
