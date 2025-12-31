@@ -88,7 +88,7 @@ export default function WorkflowBuilder() {
 
         setName(sol.name);
         setGoal(sol.description);
-        setSteps(sol.steps.map(s => ({ ...s, args_mapping: s.args_mapping || {} })));
+        setSteps(sol.steps.map((s: any) => ({ ...s, args_mapping: s.args_mapping || {} })));
         setViewMode("EDITOR");
     };
 
