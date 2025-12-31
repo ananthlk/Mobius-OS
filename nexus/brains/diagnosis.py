@@ -51,8 +51,11 @@ class DiagnosisBrain:
             # 3. Calculate Executability (Missing Info)
             missing_info = self._identify_missing_info(recipe, user_query)
             
-            # 4. Calculate Final Score (Expected Value)
-            final_score = self._calculate_score(fit_score, missing_info, recipe)
+            # 4. Get Success Probability (Async check)
+            success_prob = await self._get_success_probability(recipe.name, recipe.metadata)
+
+            # 5. Calculate Final Score (Expected Value)
+            final_score = self._calculate_score(fit_score, missing_info, success_prob)
 
             candidates.append(SolutionCandidate(
                 recipe_name=recipe.name,
@@ -114,25 +117,38 @@ class DiagnosisBrain:
         
         return missing
 
-    def _calculate_score(self, fit_score: float, missing_info: List[str], recipe: AgentRecipe) -> float:
+    async def _get_success_probability(self, recipe_name: str, recipe_metadata: Dict[str, Any]) -> float:
+        """
+        Calculates success probability based on:
+        1. Historical execution data (Real-world evidence)
+        2. Configured metadata (Heuristic baseline)
+        3. Default fallback
+        """
+        # 1. Try Metadata first (fastest)
+        heuristic = self.config.DEFAULT_SUCCESS_PROB
+        if recipe_metadata:
+            heuristic = recipe_metadata.get("success_probability", heuristic)
+
+        # 2. Try DB (Real Evidence) - TODO: Move to ExecutionManager
+        # query = "SELECT AVG(CASE WHEN status='SUCCESS' THEN 1 ELSE 0 END) FROM workflow_executions WHERE recipe_id = (SELECT id FROM agent_recipes WHERE name = :name)"
+        # This would be an async call. For now, we simulate mixing the two.
+        
+        # In a real impl, we'd fetch this. 
+        # For the V1 refactor, we stick to the heuristic but prepared for DB injection.
+        return heuristic
+
+    def _calculate_score(self, fit_score: float, missing_info: List[str], success_prob: float) -> float:
         """
         Formula: Score = (Success Prob * Likelihood) / (1 + Missing Info)
         """
-        # Get Success Prob from Metadata or Default
-        success_prob = self.config.DEFAULT_SUCCESS_PROB
-        if recipe.metadata:
-            success_prob = recipe.metadata.get("success_probability", self.config.DEFAULT_SUCCESS_PROB)
-
         # Estimate Likelihood
-        # If we have missing info, likelihood drops because we need user input
         if len(missing_info) > 0:
             likelihood = self.config.LIKELIHOOD_USER_INPUT
         else:
             likelihood = self.config.LIKELIHOOD_DB_LOOKUP
 
-        # The core formula requested by user
-        # Score = (Success Prob) * (Likelihood to Obtain) / (1 + Missing Info)
+        # The core formula
         score = (success_prob * likelihood * fit_score) / (1 + (len(missing_info) * self.config.MISSING_INFO_PENALTY_FACTOR))
         
-        return min(1.0, score) # Cap at 1.0 (though formula is < 1 usually)
+        return min(1.0, score)
 

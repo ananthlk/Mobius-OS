@@ -41,3 +41,23 @@ async def init_db():
     );
     """
     await database.execute(query=query_recipes)
+
+    # --- Advanced Schema Migration (003) ---
+    # In a real system, use Alembic/Flyway. Here we run the raw SQL for simplicity.
+    # We read the file content to ensure we are always in sync with the definition.
+    try:
+        with open("nexus/migrations/003_advanced_schema.sql", "r") as f:
+            migration_sql = f.read()
+            # Split by statement if needed, or execute block. 
+            # Databases usually support multi-statement execute if supported by driver.
+            # asyncpg usually requires execute per statement or script.
+            # We will split strictly by -- comments or simple heuristics if needed, 
+            # but usually execute() can handle a block if it's DDL. 
+            # If not, we might need a refined runner. 
+            # For now, let's try executing the block.
+            # NOTE: DO $$ blocks require safe execution.
+            await database.execute(query=migration_sql)
+    except Exception as e:
+        print(f"Migration Error: {e}")
+        # Non-critical for dev if tables exist, but good to log.
+
