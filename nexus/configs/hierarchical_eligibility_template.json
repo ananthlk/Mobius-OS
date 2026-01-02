@@ -1,0 +1,448 @@
+{
+  "template_key": "workflow:eligibility:TABULA_RASA:template",
+  "name": "Eligibility Verification Workflow Template - Hierarchical",
+  "description": "Hierarchical template with gates, sub-levels (gate responses), and tasks",
+  "template_config": {
+    "name": "Eligibility Verification Workflow",
+    "goal": "Verify patient eligibility and determine coverage status through comprehensive data gathering and analysis",
+    "gates": [
+      {
+        "id": "gate_1",
+        "gate_key": "1_patient_info_availability",
+        "name": "Patient Information Availability",
+        "description": "Gather patient demographics, identifiers, and insurance information",
+        "sub_levels": {
+          "Yes": {
+            "name": "Patient information available",
+            "description": "Patient has name, DOB, and insurance information",
+            "tasks": [
+              {
+                "id": "step_1.1",
+                "description": "Collect patient name (first, middle, last)",
+                "tool_hint": "collect_patient_name",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.2",
+                "description": "Collect patient date of birth",
+                "tool_hint": "collect_patient_dob",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.3",
+                "description": "Check EMR system for existing patient record",
+                "tool_hint": "check_emr_patient_record",
+                "timeline_estimate": "after step_1.2"
+              },
+              {
+                "id": "step_1.4",
+                "description": "Retrieve patient demographics from EMR (name, DOB, address, phone)",
+                "tool_hint": "retrieve_emr_demographics",
+                "timeline_estimate": "after step_1.3"
+              },
+              {
+                "id": "step_1.5",
+                "description": "Retrieve insurance information from EMR insurance table",
+                "tool_hint": "retrieve_emr_insurance",
+                "timeline_estimate": "after step_1.3"
+              },
+              {
+                "id": "step_1.6",
+                "description": "Validate and reconcile patient information from all sources",
+                "tool_hint": "validate_patient_info",
+                "timeline_estimate": "after step_1.5",
+                "requires_human_review": true
+              }
+            ]
+          },
+          "No": {
+            "name": "No patient information available",
+            "description": "Cannot support workflow - insufficient patient information",
+            "tasks": [
+              {
+                "id": "step_1.1",
+                "description": "Check patient information availability status",
+                "tool_hint": "check_patient_info_availability",
+                "timeline_estimate": "immediately"
+              },
+              {
+                "id": "step_1.2",
+                "description": "Cannot support workflow - insufficient patient information",
+                "tool_hint": "stop_workflow_insufficient_info",
+                "timeline_estimate": "after step_1.1",
+                "requires_human_review": true,
+                "human_action_description": "Inform user that workflow cannot proceed without patient information"
+              }
+            ]
+          },
+          "Partial": {
+            "name": "Partial patient information available",
+            "description": "Some patient information is available, need to collect missing pieces",
+            "tasks": [
+              {
+                "id": "step_1.1",
+                "description": "Collect patient name (first, middle, last)",
+                "tool_hint": "collect_patient_name",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.2",
+                "description": "Collect patient date of birth",
+                "tool_hint": "collect_patient_dob",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.3",
+                "description": "Collect Medical Record Number (MRN) if available",
+                "tool_hint": "collect_mrn",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.4",
+                "description": "Collect insurance information (payer name, policy number, group number)",
+                "tool_hint": "collect_insurance_info",
+                "timeline_estimate": "immediately",
+                "requires_human_action": true
+              },
+              {
+                "id": "step_1.5",
+                "description": "Check EMR system for existing patient record",
+                "tool_hint": "check_emr_patient_record",
+                "timeline_estimate": "after step_1.3"
+              },
+              {
+                "id": "step_1.6",
+                "description": "Retrieve patient demographics from EMR if record exists",
+                "tool_hint": "retrieve_emr_demographics",
+                "timeline_estimate": "after step_1.5"
+              },
+              {
+                "id": "step_1.7",
+                "description": "Validate and reconcile patient information from all sources",
+                "tool_hint": "validate_patient_info",
+                "timeline_estimate": "after step_1.6",
+                "requires_human_review": true
+              }
+            ]
+          },
+          "Unknown": {
+            "name": "Unknown patient information status",
+            "description": "Future support: LLM-assisted patient information gathering",
+            "tasks": [
+              {
+                "id": "step_1.1",
+                "description": "Future support: LLM-assisted patient information gathering",
+                "tool_hint": "llm_assisted_info_gathering",
+                "timeline_estimate": "immediately",
+                "requires_human_review": true,
+                "human_action_description": "LLM will assist in gathering patient information (future feature)"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "gate_2",
+        "gate_key": "2_insurance_history",
+        "name": "Insurance History",
+        "description": "Evaluate insurance history and compute risk scores",
+        "sub_levels": {
+          "Yes": {
+            "name": "Patient has known insurance history inconsistencies",
+            "description": "Patient has history of insurance coverage issues - requires enhanced verification",
+            "tasks": [
+              {
+                "id": "step_2.1",
+                "description": "Compute member eligibility risk score based on insurance history",
+                "tool_hint": "compute_eligibility_risk_score",
+                "timeline_estimate": "after gate_1"
+              },
+              {
+                "id": "step_2.2",
+                "description": "Check if we have permissions to communicate directly with patient",
+                "tool_hint": "check_patient_communication_permissions",
+                "timeline_estimate": "after step_2.1",
+                "requires_human_review": true,
+                "human_action_description": "Confirm patient communication permissions (HIPAA compliance)"
+              },
+              {
+                "id": "step_2.3",
+                "description": "Check if we can query other providers or health information exchanges",
+                "tool_hint": "check_other_providers_hie",
+                "timeline_estimate": "after step_2.2",
+                "requires_human_review": true,
+                "human_action_description": "Confirm access to HIE or other provider networks"
+              },
+              {
+                "id": "step_2.4",
+                "description": "Check historical eligibility records from past transactions",
+                "tool_hint": "check_historical_eligibility",
+                "timeline_estimate": "after step_2.3"
+              }
+            ]
+          },
+          "No": {
+            "name": "No known insurance history issues",
+            "description": "Patient has clean insurance history - standard verification process",
+            "tasks": [
+              {
+                "id": "step_2.1",
+                "description": "Perform standard eligibility risk assessment",
+                "tool_hint": "standard_eligibility_risk_assessment",
+                "timeline_estimate": "after gate_1"
+              }
+            ]
+          },
+          "Don't Know": {
+            "name": "Unknown insurance history status",
+            "description": "Insurance history status unknown - use consistent non-specific flow",
+            "tasks": [
+              {
+                "id": "step_2.1",
+                "description": "Perform general eligibility risk assessment",
+                "tool_hint": "general_eligibility_risk_assessment",
+                "timeline_estimate": "after gate_1"
+              },
+              {
+                "id": "step_2.2",
+                "description": "Perform standard eligibility verification process",
+                "tool_hint": "standard_eligibility_verification",
+                "timeline_estimate": "after step_2.1"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "gate_3",
+        "gate_key": "3_use_case",
+        "name": "Use Case",
+        "description": "Perform use-case specific verification tasks",
+        "sub_levels": {
+          "Billing": {
+            "name": "Insurance Billing",
+            "description": "Eligibility check for insurance billing purposes",
+            "tasks": [
+              {
+                "id": "step_3.1",
+                "description": "Retrieve claim details for past event",
+                "tool_hint": "retrieve_claim_details",
+                "timeline_estimate": "after gate_2"
+              },
+              {
+                "id": "step_3.2",
+                "description": "Verify service dates match eligibility period",
+                "tool_hint": "verify_service_date_eligibility",
+                "timeline_estimate": "after step_3.1"
+              },
+              {
+                "id": "step_3.3",
+                "description": "Check for prior authorization requirements",
+                "tool_hint": "check_prior_authorization",
+                "timeline_estimate": "after step_3.2",
+                "requires_human_review": true
+              }
+            ]
+          },
+          "Clinical": {
+            "name": "Clinical Programming",
+            "description": "Eligibility check for clinical scheduling and programming",
+            "tasks": [
+              {
+                "id": "step_3.1",
+                "description": "Determine eligible dates for scheduling",
+                "tool_hint": "check_eligible_dates",
+                "timeline_estimate": "after gate_2"
+              },
+              {
+                "id": "step_3.2",
+                "description": "Check visit authorization limits and frequency",
+                "tool_hint": "check_visit_authorization",
+                "timeline_estimate": "after step_3.1"
+              },
+              {
+                "id": "step_3.3",
+                "description": "Verify coverage for specific procedure codes",
+                "tool_hint": "verify_procedure_coverage",
+                "timeline_estimate": "after step_3.2",
+                "requires_human_review": true
+              }
+            ]
+          },
+          "Financial": {
+            "name": "Financial/Balance Billing",
+            "description": "Eligibility check for patient balance and financial purposes",
+            "tasks": [
+              {
+                "id": "step_3.1",
+                "description": "Calculate copay estimation",
+                "tool_hint": "calculate_copay_estimate",
+                "timeline_estimate": "after gate_2"
+              },
+              {
+                "id": "step_3.2",
+                "description": "Check deductible status and remaining balance",
+                "tool_hint": "check_deductible_status",
+                "timeline_estimate": "after step_3.1"
+              },
+              {
+                "id": "step_3.3",
+                "description": "Calculate out-of-pocket maximum status",
+                "tool_hint": "calculate_oop_max_status",
+                "timeline_estimate": "after step_3.2",
+                "requires_human_review": true
+              }
+            ]
+          },
+          "Other": {
+            "name": "Other Use Case",
+            "description": "General eligibility verification for other purposes",
+            "tasks": [
+              {
+                "id": "step_3.1",
+                "description": "Perform general eligibility verification",
+                "tool_hint": "general_eligibility_check",
+                "timeline_estimate": "after gate_2"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "gate_4",
+        "gate_key": "4_ineligibility_handling",
+        "name": "Check Eligibility",
+        "description": "Verify eligibility status through direct insurance transactions",
+        "sub_levels": {
+          "_default": {
+            "name": "Standard Eligibility Check",
+            "description": "Standard eligibility verification process",
+            "tasks": [
+              {
+                "id": "step_4.1",
+                "description": "Check eligibility via direct insurance transaction (270/271 EDI or payer API)",
+                "tool_hint": "check_eligibility_direct",
+                "timeline_estimate": "after gate_3"
+              },
+              {
+                "id": "step_4.2",
+                "description": "Parse eligibility response and extract coverage details",
+                "tool_hint": "parse_eligibility_response",
+                "timeline_estimate": "after step_4.1"
+              },
+              {
+                "id": "step_4.3",
+                "description": "Check eligibility via HIE and historical context if direct unavailable",
+                "tool_hint": "check_eligibility_imputed",
+                "timeline_estimate": "after step_4.1 if direct unavailable",
+                "condition": "2_insurance_history == 'Yes' or 1_patient_info_availability == 'Partial'"
+              },
+              {
+                "id": "step_4.4",
+                "description": "Validate eligibility effective dates and coverage periods",
+                "tool_hint": "validate_eligibility_dates",
+                "timeline_estimate": "after step_4.2"
+              },
+              {
+                "id": "step_4.5",
+                "description": "Extract benefit details (deductibles, copays, coinsurance, limits)",
+                "tool_hint": "extract_benefit_details",
+                "timeline_estimate": "after step_4.4"
+              },
+              {
+                "id": "step_4.6",
+                "description": "Check for secondary/tertiary insurance coverage",
+                "tool_hint": "check_secondary_insurance",
+                "timeline_estimate": "after step_4.5"
+              },
+              {
+                "id": "step_4.7",
+                "description": "Compile comprehensive eligibility report",
+                "tool_hint": "compile_eligibility_report",
+                "timeline_estimate": "after step_4.6",
+                "requires_human_review": true
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "gate_5",
+        "gate_key": "5_urgency_timeline",
+        "name": "Next Steps & Stakeholder Notification",
+        "description": "Handle outcomes based on eligibility status and notify relevant stakeholders",
+        "sub_levels": {
+          "_default": {
+            "name": "Outcome Handling",
+            "description": "Handle eligibility outcomes and notify stakeholders",
+            "tasks": [
+              {
+                "id": "step_5.1",
+                "description": "If eligible: Confirm coverage status and prepare confirmation document",
+                "tool_hint": "handle_eligible_outcome",
+                "timeline_estimate": "after gate_4",
+                "requires_human_review": true
+              },
+              {
+                "id": "step_5.2",
+                "description": "If eligible: Notify clinical staff and billing department of confirmed coverage",
+                "tool_hint": "notify_stakeholders_eligible",
+                "timeline_estimate": "after step_5.1"
+              },
+              {
+                "id": "step_5.3",
+                "description": "If not eligible: Execute handling action based on gate selection",
+                "tool_hint": "handle_not_eligible_outcome",
+                "timeline_estimate": "after gate_4",
+                "requires_human_review": true
+              },
+              {
+                "id": "step_5.4",
+                "description": "If not eligible: Notify provider and patient of ineligibility status",
+                "tool_hint": "notify_ineligibility",
+                "timeline_estimate": "after step_5.3",
+                "condition": "4_ineligibility_handling == 'Notify Provider' or 4_ineligibility_handling == 'Escalate'"
+              },
+              {
+                "id": "step_5.5",
+                "description": "If not eligible: Explore state program alternatives for coverage",
+                "tool_hint": "explore_state_alternatives",
+                "timeline_estimate": "after step_5.4",
+                "requires_human_review": true,
+                "condition": "4_ineligibility_handling == 'Manual Review' or 4_ineligibility_handling == 'Other'"
+              },
+              {
+                "id": "step_5.6",
+                "description": "If unable to determine: Escalate to eligibility specialist for manual review",
+                "tool_hint": "handle_unable_to_determine",
+                "timeline_estimate": "after gate_4",
+                "requires_human_review": true
+              },
+              {
+                "id": "step_5.7",
+                "description": "If unable to determine: Notify provider and patient of pending review",
+                "tool_hint": "notify_pending_review",
+                "timeline_estimate": "after step_5.6"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "match_pattern": {
+    "gates": {
+      "1_patient_info_availability": null,
+      "2_insurance_history": null,
+      "3_use_case": null,
+      "4_ineligibility_handling": null,
+      "5_urgency_timeline": null
+    }
+  }
+}
+

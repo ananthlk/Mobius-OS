@@ -68,6 +68,17 @@ class GateEngine:
             f"Previous gates: {len(previous_state.gates) if previous_state else 0}"
         )
         
+        # DETERMINISTIC PATH: If no user input, determine next gate without LLM call
+        if not user_text or not user_text.strip():
+            self.mem.log_thinking("[GATE_ENGINE] No user input - using deterministic path")
+            return self._deterministic_next_gate(
+                gate_config=gate_config,
+                previous_state=previous_state
+            )
+        
+        # LLM PATH: Only when there's actual user input
+        self.mem.log_thinking("[GATE_ENGINE] User input detected - using LLM extraction path")
+        
         # Step 1: Build LLM prompt for extraction
         llm_prompt = self._build_extraction_prompt(
             user_text=user_text,
@@ -495,6 +506,125 @@ class GateEngine:
         
         # All gates complete
         return None
+    
+    def _deterministic_next_gate(
+        self,
+        gate_config: GateConfig,
+        previous_state: Optional[GateState]
+    ) -> ConsultantResult:
+        """
+        Deterministically determine next gate without LLM call.
+        Used when there's no user input to process.
+        """
+        if not previous_state:
+            # First gate - return first gate in order
+            first_gate_key = gate_config.gate_order[0] if gate_config.gate_order else None
+            if not first_gate_key:
+                # No gates defined - return error
+                return self._create_error_result(
+                    gate_config=gate_config,
+                    previous_state=None,
+                    errors=[ParseError(message="No gates defined in gate_config", field="gate_order")]
+                )
+            
+            first_gate_def = gate_config.gates.get(first_gate_key)
+            first_question = first_gate_def.question if first_gate_def else "Let's get started"
+            
+            initial_state = GateState(
+                summary="",
+                gates={},
+                status=StatusInfo(
+                    pass_=False,
+                    next_gate=first_gate_key,
+                    next_query=first_question
+                )
+            )
+            
+            return ConsultantResult(
+                decision=GateDecision.NEXT_GATE,
+                pass_=False,
+                next_question=first_question,
+                proposed_state=initial_state,
+                updated_gates=[],
+                reasoning="Initial gate - no user input yet"
+            )
+        
+        # Find first missing required gate deterministically
+        for gate_key in gate_config.gate_order:
+            gate_def = gate_config.gates.get(gate_key)
+            if not gate_def:
+                continue
+            
+            if gate_def.required:
+                gate_value = previous_state.gates.get(gate_key)
+                if not gate_value or not gate_value.classified:
+                    # Found missing required gate
+                    return ConsultantResult(
+                        decision=GateDecision.NEXT_GATE,
+                        pass_=False,
+                        next_question=gate_def.question,
+                        proposed_state=GateState(
+                            summary=previous_state.summary,
+                            gates=previous_state.gates,
+                            status=StatusInfo(
+                                pass_=False,
+                                next_gate=gate_key,
+                                next_query=gate_def.question
+                            )
+                        ),
+                        updated_gates=[],
+                        reasoning=f"Deterministic: next required gate is {gate_key}"
+                    )
+        
+        # Check optional gates
+        for gate_key in gate_config.gate_order:
+            gate_def = gate_config.gates.get(gate_key)
+            if not gate_def or gate_def.required:
+                continue
+            
+            gate_value = previous_state.gates.get(gate_key)
+            if not gate_value or not gate_value.classified:
+                # Found missing optional gate
+                return ConsultantResult(
+                    decision=GateDecision.NEXT_GATE,
+                    pass_=False,
+                    next_question=gate_def.question,
+                    proposed_state=GateState(
+                        summary=previous_state.summary,
+                        gates=previous_state.gates,
+                        status=StatusInfo(
+                            pass_=False,
+                            next_gate=gate_key,
+                            next_query=gate_def.question
+                        )
+                    ),
+                    updated_gates=[],
+                    reasoning=f"Deterministic: next optional gate is {gate_key}"
+                )
+        
+        # All gates complete (deterministic check)
+        completion_result = self._check_completion(
+            gate_config=gate_config,
+            current_state=previous_state,
+            user_override=False
+        )
+        
+        return ConsultantResult(
+            decision=GateDecision.PASS if completion_result[0] else GateDecision.NEXT_GATE,
+            pass_=completion_result[0],
+            next_question=None,
+            proposed_state=GateState(
+                summary=previous_state.summary,
+                gates=previous_state.gates,
+                status=StatusInfo(
+                    pass_=completion_result[0],
+                    next_gate=None,
+                    next_query=None
+                )
+            ),
+            updated_gates=[],
+            reasoning="Deterministic: all gates appear complete"
+        )
     
     def _check_completion(
         self,

@@ -67,3 +67,4 @@ ALTER TABLE shaping_sessions
 ADD COLUMN IF NOT EXISTS consultant_iteration_count INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS max_iterations INTEGER DEFAULT 15;
 
+

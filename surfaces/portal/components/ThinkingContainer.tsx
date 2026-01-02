@@ -27,15 +27,15 @@ export default function ThinkingContainer({
     // - If explicitly collapsed (false), never show (even if streaming)
     // - If never toggled (undefined), auto-expand if streaming
     const shouldShowContent = isExpanded === true || (isExpanded === undefined && isStreaming && !message.collapsed);
-    // Never show streaming animation if message is collapsed
-    const showStreaming = isStreaming && !message.collapsed;
+    // Show streaming animation whenever isStreaming is true (regardless of collapsed state)
+    const showStreaming = isStreaming;
     
     return (
         <div className="flex gap-3 relative">
             {/* Timeline line and icon */}
             <div className="flex flex-col items-center flex-shrink-0">
                 <Tooltip content="AI thinking process - shows the reasoning steps the agent takes to understand and respond to your request">
-                    <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center border-2 border-white shadow-sm cursor-help">
+                    <div className={`w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center border-2 border-white shadow-sm cursor-help ${showStreaming ? 'animate-spin' : ''}`}>
                         <Bot size={12} />
                     </div>
                 </Tooltip>
@@ -56,7 +56,12 @@ export default function ThinkingContainer({
                             {showStreaming ? (
                                 <span className="inline-flex items-center gap-1.5">
                                     <span className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></span>
-                                    <span>Thinking...</span>
+                                    <span>Thinking</span>
+                                    <span className="inline-block">
+                                        <span className="animate-dots-1">.</span>
+                                        <span className="animate-dots-2">.</span>
+                                        <span className="animate-dots-3">.</span>
+                                    </span>
                                 </span>
                             ) : (
                                 `Thinking (${message.thinkingMessages?.length || 0})`
@@ -76,11 +81,22 @@ export default function ThinkingContainer({
                     <div className="ml-2.5 mt-1 pb-2">
                         {/* Thinking messages container with max height and scroll */}
                         <div className="max-h-[300px] overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
-                            {message.thinkingMessages?.map((thought, idx) => (
-                                <div key={idx} className="text-xs text-gray-600 leading-relaxed pl-2 border-l-2 border-blue-200">
-                                    {thought}
-                                </div>
-                            ))}
+                            {message.thinkingMessages?.map((thought, idx) => {
+                                const isLastMessage = idx === (message.thinkingMessages?.length || 0) - 1;
+                                const showDots = isLastMessage && showStreaming;
+                                return (
+                                    <div key={idx} className="text-xs text-gray-600 leading-relaxed pl-2 border-l-2 border-blue-200">
+                                        {thought}
+                                        {showDots && (
+                                            <span className="inline-block ml-1">
+                                                <span className="animate-dots-1">.</span>
+                                                <span className="animate-dots-2">.</span>
+                                                <span className="animate-dots-3">.</span>
+                                            </span>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}

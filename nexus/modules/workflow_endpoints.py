@@ -306,3 +306,344 @@ async def diagnose_problem(req: Dict[str, str]):
     except Exception as e:
         logger.error(f"Failed to diagnose problem: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Planning Phase Endpoints ---
+
+class PlanningPhaseDecisionRequest(BaseModel):
+    choice: str  # 'build_new' or 'reuse'
+
+class PlanningPhaseReviewRequest(BaseModel):
+    selected_step_id: Optional[str] = None
+
+@router.post("/shaping/{session_id}/planning-phase/decision")
+async def planning_phase_decision(session_id: int, req: PlanningPhaseDecisionRequest):
+    """
+    Handle Build New vs Reuse decision.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    logger.info(f"[PLANNING_PHASE_DECISION] Received request: session_id={session_id}, choice={req.choice}")
+    
+    try:
+        result = await planning_phase_brain.handle_build_reuse_decision(
+            session_id=session_id,
+            choice=req.choice
+        )
+        logger.info(f"[PLANNING_PHASE_DECISION] Success: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[PLANNING_PHASE_DECISION] Failed to handle planning phase decision: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/shaping/{session_id}/planning-phase/compute")
+async def planning_phase_compute(session_id: int):
+    """
+    Run system computation to analyze plan and detect ambiguous/missing info steps.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.compute_plan_analysis(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to compute plan analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/shaping/{session_id}/planning-phase/overview")
+async def planning_phase_overview(session_id: int):
+    """
+    Get generic overview of the plan.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.generate_plan_overview(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to generate plan overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/shaping/{session_id}/planning-phase/options")
+async def planning_phase_options(session_id: int):
+    """
+    Get conditional options based on card status.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.get_planning_options(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get planning options: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/shaping/{session_id}/planning-phase/approve")
+async def planning_phase_approve(session_id: int):
+    """
+    Approve the plan.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.handle_approve(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to approve plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/shaping/{session_id}/planning-phase/review")
+async def planning_phase_review(session_id: int, req: PlanningPhaseReviewRequest):
+    """
+    Enter review mode for a specific step or auto-select first problematic step.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.handle_review_plan(
+            session_id=session_id,
+            selected_step_id=req.selected_step_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to enter review mode: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/shaping/{session_id}/planning-phase/cancel")
+async def planning_phase_cancel(session_id: int):
+    """
+    Cancel planning phase and return to gate phase.
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        result = await planning_phase_brain.handle_cancel(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to cancel planning phase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# Template Management Endpoints (Reusable)
+# ============================================================================
+
+@router.post("/templates/eligibility")
+async def save_eligibility_template(
+    template: Dict[str, Any],
+    user_id: str = "user_123"
+):
+    """
+    Save an eligibility plan template from Live Builder.
+    
+    Body:
+    {
+        "template_key": "eligibility:insurance_billing:past_event",
+        "name": "Insurance Billing - Past Event",
+        "description": "Template for billing past events",
+        "template_config": {
+            "phases": [...],
+            "gate_mapping": {...}
+        },
+        "match_pattern": {
+            "gates": {
+                "2_use_case": "insurance_billing_past_event"
+            }
+        }
+    }
+    """
+    from nexus.templates.template_manager import eligibility_template_manager
+    from nexus.core.tree_structure_manager import TreePath
+    
+    # Parse template key or build from components
+    if ":" in template.get("template_key", ""):
+        path = TreePath.from_key(template["template_key"])
+    else:
+        path = TreePath(
+            module=template.get("module", "workflow"),
+            domain=template.get("domain", "eligibility"),
+            strategy=template.get("strategy", "TABULA_RASA"),
+            step=template.get("step", "template")
+        )
+    
+    template_id = await eligibility_template_manager.save_template(
+        path=path,
+        name=template["name"],
+        template_config=template["template_config"],
+        match_pattern=template.get("match_pattern", {}),
+        description=template.get("description"),
+        user_id=user_id
+    )
+    
+    return {
+        "success": True,
+        "template_id": template_id,
+        "template_key": template.get("template_key") or path.to_key()
+    }
+
+@router.get("/templates/eligibility")
+async def list_eligibility_templates():
+    """
+    List all active eligibility templates.
+    """
+    from nexus.templates.template_manager import eligibility_template_manager
+    from nexus.core.tree_structure_manager import TreePath
+    
+    # Get templates for eligibility domain
+    path = TreePath(
+        module="workflow",
+        domain="eligibility",
+        strategy="TABULA_RASA",
+        step="template"
+    )
+    
+    templates = await eligibility_template_manager.list_templates(path)
+    return templates
+
+@router.get("/templates/eligibility/{template_key:path}")
+async def get_eligibility_template(template_key: str):
+    """
+    Get a specific template by key.
+    """
+    from nexus.templates.template_manager import eligibility_template_manager
+    from nexus.core.tree_structure_manager import TreePath
+    
+    try:
+        path = TreePath.from_key(template_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid template key format: {template_key}")
+    
+    template = await eligibility_template_manager.get_template(path)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    return template
+
+# ============================================================================
+# Plan State Management Endpoints (Reusable)
+# ============================================================================
+
+@router.post("/plans/{plan_id}/approve")
+async def approve_plan(plan_id: int, user_id: str = "user_123"):
+    """
+    Approve a plan (DRAFT -> USER_APPROVED).
+    """
+    from nexus.core.plan_state_manager import plan_state_manager
+    from nexus.core.plan_models import PlanStatus
+    
+    await plan_state_manager.update_plan_status(
+        plan_id=plan_id,
+        new_status=PlanStatus.USER_APPROVED,
+        user_id=user_id
+    )
+    return {"success": True, "status": "user_approved"}
+
+@router.post("/plans/{plan_id}/steps/{step_id}/enhance")
+async def enhance_step(
+    plan_id: int,
+    step_id: str,
+    enhancement: Dict[str, Any],
+    user_id: str = "user_123"
+):
+    """
+    Enhance a step with tool definition.
+    
+    Body:
+    {
+        "tool": {
+            "tool_name": "check_eligibility_direct",
+            "inputs": {"patient_id": "{{gate_state...}}"},
+            "outputs": {"eligibility_status": "..."}
+        },
+        "reason": "Agent determined best tool for this step"
+    }
+    """
+    from nexus.core.plan_state_manager import plan_state_manager
+    from nexus.core.plan_models import ToolDefinition
+    
+    tool = ToolDefinition(**enhancement["tool"])
+    
+    await plan_state_manager.enhance_step_with_tool(
+        plan_id=plan_id,
+        step_id=step_id,
+        tool=tool,
+        enhanced_by=user_id,
+        enhanced_by_type="agent",
+        reason=enhancement.get("reason")
+    )
+    
+    return {"success": True}
+
+@router.post("/plans/{plan_id}/steps/{step_id}/map-inputs")
+async def map_step_inputs(
+    plan_id: int,
+    step_id: str,
+    input_mapping: Dict[str, str],
+    user_id: str = "user_123"
+):
+    """
+    Map step inputs to data sources.
+    
+    Body:
+    {
+        "patient_id": "{{gate_state.gates.1_patient_info.patient_id}}",
+        "dob": "{{gate_state.gates.1_patient_info.dob}}"
+    }
+    """
+    from nexus.core.plan_state_manager import plan_state_manager
+    
+    await plan_state_manager.map_step_inputs(
+        plan_id=plan_id,
+        step_id=step_id,
+        input_mapping=input_mapping,
+        mapped_by=user_id
+    )
+    
+    return {"success": True}
+
+@router.get("/plans/{plan_id}")
+async def get_plan_with_state(plan_id: int):
+    """
+    Get plan with full state metadata.
+    """
+    from nexus.modules.database import database
+    from nexus.modules.database import parse_jsonb
+    
+    query = """
+        SELECT p.*, 
+               json_agg(
+                   json_build_object(
+                       'id', ph.phase_id,
+                       'name', ph.phase_name,
+                       'status', ph.status,
+                       'steps', (
+                           SELECT json_agg(
+                               json_build_object(
+                                   'id', s.step_id,
+                                   'description', s.description,
+                                   'status', s.status,
+                                   'tool', s.tool_definition,
+                                   'metadata', s.metadata
+                               )
+                           )
+                           FROM workflow_plan_steps s
+                           WHERE s.phase_id = ph.id
+                           ORDER BY s.execution_order
+                       )
+                   )
+               ) FILTER (WHERE ph.id IS NOT NULL) as phases
+        FROM workflow_plans p
+        LEFT JOIN workflow_plan_phases ph ON ph.plan_id = p.id
+        WHERE p.id = :plan_id
+        GROUP BY p.id
+    """
+    
+    row = await database.fetch_one(query, {"plan_id": plan_id})
+    if not row:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    
+    result = dict(row)
+    if result.get("plan_structure"):
+        result["plan_structure"] = parse_jsonb(result["plan_structure"])
+    if result.get("metadata"):
+        result["metadata"] = parse_jsonb(result["metadata"])
+    
+    return result

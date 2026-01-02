@@ -130,3 +130,4 @@ class PatientInsuranceCollector(NexusTool):
             "status": "pending_response"
         }
 
+

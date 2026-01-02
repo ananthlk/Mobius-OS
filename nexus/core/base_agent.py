@@ -50,7 +50,11 @@ class BaseAgent(ABC):
         # We spawn a background task so we don't block the agent loop
         asyncio.create_task(self._persist_event(bucket, payload))
         
-        # 3. Artifact Trigger
+        # 3. CRITICAL: If DRAFT_PLAN artifact, also persist to shaping_sessions.draft_plan
+        if bucket == "ARTIFACTS" and payload.get("type") == "DRAFT_PLAN":
+            asyncio.create_task(self._persist_draft_plan(payload))
+        
+        # 4. Artifact Trigger
         if bucket == "ARTIFACTS":
             # Fire and forget the ParallelPlanner
             asyncio.create_task(self._notify_parallel_planner(payload))
@@ -81,6 +85,35 @@ class BaseAgent(ABC):
             # We log but DO NOT crash the stream
             self.logger.error(f"❌ DB Persistence Failed for {bucket}: {e}")
 
+    async def _persist_draft_plan(self, payload: Dict[str, Any]):
+        """
+        Persist DRAFT_PLAN artifact to shaping_sessions.draft_plan column.
+        This ensures the draft plan is available in session data for frontend.
+        Called automatically whenever a DRAFT_PLAN artifact is emitted.
+        """
+        try:
+            draft_plan_data = payload.get("data")
+            if not draft_plan_data:
+                self.logger.warning("DRAFT_PLAN artifact has no 'data' field")
+                return
+            
+            # Convert to JSON-serializable format
+            serializable_plan = self._make_json_serializable(draft_plan_data)
+            
+            query = """
+            UPDATE shaping_sessions 
+            SET draft_plan = :draft, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = :sid
+            """
+            await database.execute(query=query, values={
+                "sid": self.session_id,
+                "draft": json.dumps(serializable_plan)
+            })
+            self.logger.debug(f"✅ Persisted DRAFT_PLAN to shaping_sessions.draft_plan for session {self.session_id}")
+        except Exception as e:
+            # Log but don't crash - artifact is still in memory_events
+            self.logger.error(f"❌ Failed to persist DRAFT_PLAN to shaping_sessions: {e}")
+
     def _make_json_serializable(self, obj: Any) -> Any:
         """
         Recursively convert dataclass objects and other non-serializable types to JSON-serializable formats.
@@ -101,16 +134,63 @@ class BaseAgent(ABC):
 
     async def _notify_parallel_planner(self, payload: Dict[str, Any]):
         """
-        Internal: Notify ParallelPlanner to re-calculate matching workflows.
+        Internal: Notify Live Builder (Planner) to update draft plan.
+        This is called whenever ARTIFACTS are emitted.
+        Live builder updates deterministically (no LLM calls during gate stage).
         """
         try:
-            # Stub for ParallelPlanner interaction
-            # In a real system, this might call another service or brain
-            self.logger.info(f"⚡️ Triggering ParallelPlanner for Artifact update...")
-            # e.g., await parallel_planner.recalculate(self.session_id)
-            pass
+            artifact_type = payload.get("type")
+            
+            # Skip DRAFT_PLAN to prevent infinite recursion (DRAFT_PLAN is already the result)
+            if artifact_type == "DRAFT_PLAN":
+                return  # Don't process DRAFT_PLAN artifacts to prevent recursion
+            
+            # Only process GATE_STATE_UPDATE and PROBLEM_STATEMENT artifacts
+            if artifact_type in ["GATE_STATE_UPDATE", "PROBLEM_STATEMENT"]:
+                from nexus.brains.planner import planner_brain
+                from nexus.modules.shaping_manager import shaping_manager
+                
+                # Get session data
+                session = await shaping_manager.get_session(self.session_id)
+                if not session:
+                    return
+                
+                # Get gate state
+                gate_state = await shaping_manager._load_gate_state(self.session_id)
+                if not gate_state:
+                    # If no gate state yet, skip (session just created)
+                    return
+                
+                # Get transcript and context
+                transcript = session.get("transcript", [])
+                strategy = session.get("consultant_strategy", "TABULA_RASA")
+                rag_data = session.get("rag_citations", [])
+                
+                context = {
+                    "gate_state": gate_state,
+                    "session_id": self.session_id,
+                    "strategy": strategy,
+                    "manuals": rag_data
+                }
+                
+                # If problem_statement is in payload, use it
+                if artifact_type == "PROBLEM_STATEMENT":
+                    problem_statement = payload.get("data", {}).get("problem_statement")
+                    if problem_statement:
+                        context["problem_statement"] = problem_statement
+                
+                # Update draft plan deterministically (no LLM call during gate stage)
+                # NOTE: Do NOT emit ARTIFACTS here - shaping_manager already handles that
+                # This prevents infinite recursion
+                updated_draft = await planner_brain.update_draft(transcript, context)
+                
+                # DO NOT emit ARTIFACTS here - it would cause infinite recursion
+                # The shaping_manager.append_message() already emits ARTIFACTS after calling update_draft
+                # We're just updating the draft plan silently here
+                
+                self.logger.info(f"⚡️ Live Builder updated draft plan for session {self.session_id}")
         except Exception as e:
-            self.logger.error(f"⚠️ ParallelPlanner Trigger Failed: {e}")
+            self.logger.error(f"⚠️ Live Builder update failed: {e}", exc_info=True)
 
     # --- Type-Safe Emission Helper Methods ---
     

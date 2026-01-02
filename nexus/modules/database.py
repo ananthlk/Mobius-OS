@@ -252,3 +252,23 @@ async def init_db():
         print("Migration 019 (Tool Conditional Execution) applied.")
     except Exception as e:
         print(f"Migration 019 Error: {e}")
+
+    # 021: Eligibility Plan Templates
+    try:
+        sql = read_migration("021_eligibility_plan_templates.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 021 (Eligibility Plan Templates) applied.")
+    except Exception as e:
+        print(f"Migration 021 Error: {e}")
+
+    # 022: Workflow Plan State
+    try:
+        sql = read_migration("022_workflow_plan_state.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 022 (Workflow Plan State) applied.")
+    except Exception as e:
+        print(f"Migration 022 Error: {e}")

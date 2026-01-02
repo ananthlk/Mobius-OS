@@ -112,15 +112,24 @@ class ShapingManager:
         )
         
         if not prompt_data:
+            logging.warning(f"[SHAPING_MANAGER] No prompt data found for workflow:eligibility:{strategy}:gate")
             return None
         
         config = prompt_data.get("config", {})
         
         # Check if this is a gate-based prompt (has GATE_ORDER)
         if "GATE_ORDER" not in config:
+            logging.warning(f"[SHAPING_MANAGER] Prompt config does not have GATE_ORDER")
             return None
         
-        return GateConfig.from_prompt_config(config)
+        gate_config = GateConfig.from_prompt_config(config)
+        
+        # Log gate config details for debugging
+        logging.info(f"[SHAPING_MANAGER] Loaded gate config: {len(gate_config.gates)} gates, order: {gate_config.gate_order}")
+        for gate_key, gate_def in gate_config.gates.items():
+            logging.info(f"[SHAPING_MANAGER] Gate '{gate_key}': question='{gate_def.question[:50]}...', expected_categories={gate_def.expected_categories}")
+        
+        return gate_config
     
     async def _format_gate_response(self, result, user_id: Optional[str] = None, session_id: Optional[int] = None) -> str:
         """Format GateEngine result for display, returning raw response (formatting happens at emission)."""
@@ -149,6 +158,98 @@ class ShapingManager:
         # NOTE: Conversational formatting is now handled inline before saving to transcript
         # This method just returns the raw formatted response
         return raw_response
+    
+    async def _emit_gate_router_options(
+        self,
+        agent: BaseAgent,
+        gate_key: str,
+        gate_config: GateConfig,
+        session_id: int,
+        user_id: Optional[str] = None
+    ) -> None:
+        """
+        Emit router options (buttons) for a gate question based on expected_categories.
+        Only emits if the gate has expected_categories defined.
+        """
+        if not gate_key or gate_key not in gate_config.gates:
+            logging.warning(f"[SHAPING_MANAGER] Cannot emit router options: gate_key '{gate_key}' not found in gate_config. Available gates: {list(gate_config.gates.keys())}")
+            return
+        
+        gate_def = gate_config.gates[gate_key]
+        
+        # Only emit router options if gate has expected_categories
+        if not gate_def.expected_categories:
+            logging.warning(f"[SHAPING_MANAGER] Cannot emit router options: gate '{gate_key}' has no expected_categories. Question: '{gate_def.question}'")
+            return
+        
+        logging.info(f"[SHAPING_MANAGER] Emitting router options for gate '{gate_key}' with {len(gate_def.expected_categories)} categories: {gate_def.expected_categories}")
+        
+        from nexus.core.button_builder import emit_action_buttons
+        
+        # Map gate categories to user-friendly display labels
+        GATE_DISPLAY_LABELS = {
+            "1_patient_info_availability": {
+                "Yes": "I have name, DOB, and insurance details",
+                "No": "I do not have any patient information",
+                "Partial": "I only have name and DOB, no insurance info",
+                "Unknown": "I'm not sure what information is available"
+            }
+            # Add more mappings as needed for other gates
+        }
+        
+        # Get display label mapping for this gate
+        display_labels = GATE_DISPLAY_LABELS.get(gate_key, {})
+        
+        # Build router buttons from expected_categories
+        buttons = []
+        for category in gate_def.expected_categories:
+            # Use display label if available, otherwise use category
+            display_label = display_labels.get(category, category)
+            
+            buttons.append({
+                "id": f"gate_{gate_key}_{category.lower().replace(' ', '_').replace('/', '_')}",
+                "label": display_label,  # User-friendly display label
+                "value": category,  # Original category for LLM classification
+                "variant": "secondary",
+                "action": {
+                    "type": "api_call",
+                    "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                    "method": "POST",
+                    "payload": {
+                        "message": category,  # Send original category as message for LLM classification
+                        "user_id": user_id or "user_123"
+                    }
+                },
+                "enabled": True,
+                "tooltip": f"Select: {display_label}"
+            })
+        
+        # Add "Other" option if categories exist
+        buttons.append({
+            "id": f"gate_{gate_key}_other",
+            "label": "Other",
+            "variant": "secondary",
+            "action": {
+                "type": "event",
+                "eventName": "gate_other_selected",
+                "payload": {"gate_key": gate_key}
+            },
+            "enabled": True,
+            "tooltip": "Select if none of the above apply"
+        })
+        
+        logging.info(f"[SHAPING_MANAGER] Emitting {len(buttons)} router buttons for gate '{gate_key}' (session_id={session_id}, agent.session_id={agent.session_id})")
+        
+        # Emit router options with gate_key in metadata for matching
+        await emit_action_buttons(
+            agent=agent,
+            buttons=buttons,
+            message=gate_def.question,
+            context="gate_question",
+            metadata={"gate_key": gate_key}  # Track which gate step these buttons belong to
+        )
+        
+        logging.info(f"[SHAPING_MANAGER] Router options emitted successfully for gate '{gate_key}'")
     
     async def _format_and_emit_output(
         self, 
@@ -221,7 +322,7 @@ class ShapingManager:
         strategy_result = await consultant_brain.decide_strategy(initial_query)
         strategy = strategy_result['strategy']
         
-        # 3. Load GateConfig and execute Gate Engine
+        # 3. Load GateConfig (but DON'T execute gate engine yet - wait for user response)
         await agent.emit("THINKING", {"message": f"Strategy Selected: {strategy}"})
         
         # Load gate config
@@ -233,41 +334,26 @@ class ShapingManager:
             await agent.emit("THINKING", {"message": error_msg})
             raise ValueError(error_msg)
         
-        # Use Gate Engine
-        await agent.emit("THINKING", {"message": "Executing gate engine..."})
+        # Initialize empty gate state (no LLM call - deterministic)
+        from nexus.core.gate_models import GateState, StatusInfo
         
-        # Execute gate (first turn, no previous state)
-        # Note: session_id is None initially, but we'll backfill thinking after session creation
-        gate_result = await self.gate_engine.execute_gate(
-            user_text=initial_query,
-            gate_config=gate_config,
-            previous_state=None,
-            actor="user",
-            session_id=None,  # Will be set after session creation
-            user_id=user_id
+        first_gate_key = gate_config.gate_order[0] if gate_config.gate_order else None
+        first_question = gate_config.gates[first_gate_key].question if first_gate_key and first_gate_key in gate_config.gates else "Let's get started"
+        
+        initial_gate_state = GateState(
+            summary="",
+            gates={},
+            status=StatusInfo(
+                pass_=False,
+                next_gate=first_gate_key,
+                next_query=first_question
+            )
         )
         
-        # Format response (pass user_id for conversational formatting)
-        raw_system_msg = await self._format_gate_response(gate_result, user_id=user_id, session_id=None)
+        # Build initial system message (just show first question, no LLM)
+        formatted_system_msg = f"I'll help you set up your eligibility verification workflow.\n\n**{first_question}**"
         plan_data = None  # Will be created from gate_state later
         thought_content = None
-        
-        # Store gate_state (will be saved after session creation)
-        initial_gate_state = gate_result.proposed_state
-
-        # Format through conversational agent BEFORE saving to transcript
-        formatted_system_msg = raw_system_msg  # Default to raw if formatting fails
-        try:
-            from nexus.brains.conversational_agent import conversational_agent
-            
-            formatted_system_msg = await conversational_agent.format_response(
-                raw_response=raw_system_msg,
-                user_id=user_id,
-                context={"operation": "session_creation", "source": "gate_engine"}
-            )
-        except Exception as e:
-            logging.warning(f"Conversational agent formatting failed during session creation: {e}, using raw response")
-            formatted_system_msg = raw_system_msg
 
         # Build transcript with FORMATTED response
         transcript = [
@@ -342,11 +428,24 @@ class ShapingManager:
         # Emit the formatted OUTPUT (already formatted above, so emit directly)
         await agent.emit("OUTPUT", {"role": "system", "content": formatted_system_msg})
         
+        # Emit router options for first gate (if available) - AFTER session_id is set
+        if initial_gate_state.status.next_gate:
+            logging.info(f"[SHAPING_MANAGER] Attempting to emit router options for gate '{initial_gate_state.status.next_gate}' (session_id={session_id}, agent.session_id={agent.session_id})")
+            await self._emit_gate_router_options(
+                agent=agent,
+                gate_key=initial_gate_state.status.next_gate,
+                gate_config=gate_config,
+                session_id=session_id,
+                user_id=user_id
+            )
+        else:
+            logging.warning(f"[SHAPING_MANAGER] No next_gate in initial_gate_state, cannot emit router options")
+        
         # Emit journey state after gate execution and strategy selection
         from nexus.conductors.workflows.orchestrator import orchestrator
         await orchestrator._emit_journey_state_update(
             session_id=session_id,
-            gate_state=gate_result.proposed_state,
+            gate_state=initial_gate_state,
             gate_config=gate_config,
             strategy=strategy_result["strategy"]
         )
@@ -354,17 +453,45 @@ class ShapingManager:
         # User Activity Log
         await self._log_activity(user_id, session_id, initial_query)
         
-        # --- 4. INITIAL PLANNER TRIGGER ---
-        # We spawn this in background so the UI loads the chat immediately
-        # The 'ARTIFACTS' event will push the plan to the sidebar when ready
-        # Use the gate_state from the initial gate execution
-        asyncio.create_task(self._trigger_planner_after_gate(
-            session_id=session_id,
-            gate_state=gate_result.proposed_state,
-            transcript=transcript,
-            strategy=strategy_result["strategy"],
-            rag_data=strategy_result['context'].get('manuals', [])
-        ))
+        # --- 4. INITIALIZE LIVE BUILDER (Retrieve Template & Create Initial Draft) ---
+        # CONTRACT: Gate Agent retrieves template and passes it to planner
+        template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
+        
+        # Initialize live builder with empty gate state (no LLM call)
+        try:
+            initial_draft = await planner_brain.update_draft(
+                transcript=transcript,
+                context={
+                    "gate_state": initial_gate_state,
+                    "session_id": session_id,
+                    "strategy": strategy,
+                    "manuals": strategy_result['context'].get('manuals', []),
+                    "template": template  # CONTRACT: Gate Agent passes template to planner
+                }
+            )
+            
+            # Emit initial ARTIFACTS for live builder
+            # Note: BaseAgent.emit() will automatically persist this to shaping_sessions.draft_plan
+            await agent.emit("ARTIFACTS", {
+                "type": "DRAFT_PLAN",
+                "data": initial_draft,
+                "summary": "Initial draft plan created for live builder"
+            })
+            
+            # Also explicitly persist here for immediate availability (BaseAgent does this too, but this ensures it)
+            try:
+                update_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
+                await database.execute(query=update_query, values={
+                    "draft": json.dumps(initial_draft),
+                    "id": session_id
+                })
+                logging.debug(f"[SHAPING_MANAGER] Persisted initial draft plan to database")
+            except Exception as e:
+                logging.error(f"[SHAPING_MANAGER] Failed to persist initial draft plan: {e}", exc_info=True)
+            
+            logging.debug(f"[SHAPING_MANAGER] Live builder initialized with template")
+        except Exception as e:
+            logging.error(f"[SHAPING_MANAGER] Live builder initialization failed: {e}", exc_info=True)
 
         return session_id
 
@@ -377,9 +504,26 @@ class ShapingManager:
             # await agent.emit("THINKING", {"message": "Drafting initial plan based on manual..."})
             # (Optional: Don't spam thinking for background tasks if it clashes with main thread)
             
-            # Load gate_state if available
+            # Load gate_state and strategy if available
             gate_state = await self._load_gate_state(session_id)
-            context = {"manuals": rag_data, "gate_state": gate_state, "session_id": session_id}
+            
+            # Get strategy from session
+            strategy_query = "SELECT consultant_strategy FROM shaping_sessions WHERE id = :id"
+            strategy_row = await database.fetch_one(strategy_query, {"id": session_id})
+            strategy = "TABULA_RASA"
+            if strategy_row:
+                strategy = dict(strategy_row).get("consultant_strategy", "TABULA_RASA")
+            
+            # CONTRACT: Gate Agent retrieves template and passes it to planner
+            template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
+            
+            context = {
+                "manuals": rag_data,
+                "gate_state": gate_state,
+                "session_id": session_id,
+                "strategy": strategy,
+                "template": template  # CONTRACT: Gate Agent passes template to planner
+            }
             
             new_draft = await planner_brain.update_draft(transcript, context)
             
@@ -401,61 +545,78 @@ class ShapingManager:
         except Exception as e:
             logging.error(f"Initial Planner Failed: {e}")
 
-    async def _trigger_planner_after_gate(
+    async def _retrieve_template_for_planner(
+        self,
+        strategy: str,
+        domain: str = "eligibility"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        CONTRACT: Gate Agent is responsible for retrieving templates.
+        This method retrieves the appropriate template(s) based on strategy and domain.
+        
+        Returns:
+            Template dict or None if not found
+        """
+        from nexus.core.tree_structure_manager import TreePath
+        from nexus.templates.template_manager import eligibility_template_manager
+        
+        path = TreePath(
+            module="workflow",
+            domain=domain,
+            strategy=strategy,
+            step="template"
+        )
+        
+        try:
+            template = await eligibility_template_manager.get_template(path)
+            if template:
+                logging.debug(f"[SHAPING_MANAGER] Retrieved template for planner: {template.get('template_key')}")
+            return template
+        except Exception as e:
+            logging.warning(f"[SHAPING_MANAGER] Template retrieval failed: {e}")
+            return None
+
+    async def _capture_gate_data_for_planner(
         self,
         session_id: int,
         gate_state: GateState,
         transcript: List[Dict[str, Any]],
         strategy: str,
         rag_data: List[Any]
-    ):
+    ) -> Dict[str, Any]:
         """
-        Helper: Triggers planner in parallel after gate execution.
-        This ensures the draft plan stays in sync with the latest gate_state.summary.
-        Runs in background (non-blocking).
+        Capture gate data for planner WITHOUT making LLM calls.
+        Returns structured data that planner can use later.
+        This is called during gate stage to collect data, but planner
+        will only be invoked after user confirms.
         """
-        agent = BaseAgent(session_id=session_id)
-        try:
-            # Get filtered conversation history for planner (only user-facing messages)
-            from nexus.conductors.workflows.orchestrator import orchestrator
-            conversation_history = await orchestrator.build_conversational_history(session_id)
-            planner_transcript = conversation_history if conversation_history else transcript
-            
-            # Build context with latest gate_state
-            context = {
-                "manuals": rag_data,
-                "gate_state": gate_state,
-                "session_id": session_id,
-                "strategy": strategy,
-                "transcript": planner_transcript
-            }
-            
-            # Update draft plan with latest gate_state.summary
-            new_draft = await planner_brain.update_draft(planner_transcript, context)
-            
-            # Emit Update
-            # Calculate total steps from phases structure
-            total_steps = sum(len(phase.get('steps', [])) for phase in new_draft.get('phases', []))
-            num_phases = len(new_draft.get('phases', []))
-            await agent.emit("ARTIFACTS", {
-                "type": "DRAFT_PLAN", 
-                "data": new_draft, 
-                "summary": f"Plan updated with {num_phases} phases, {total_steps} total steps"
-            })
-            
-            # Persist
-            update_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
-            await database.execute(query=update_query, values={
-                "draft": json.dumps(new_draft), 
-                "id": session_id
-            })
-            await agent.emit("PERSISTENCE", {"action": "UPDATE_PLAN", "id": session_id})
-            
-            logging.debug(f"[SHAPING_MANAGER] Planner triggered after gate execution for session {session_id}")
-        except Exception as e:
-            logging.error(f"Planner trigger after gate failed for session {session_id}: {e}", exc_info=True)
+        # asdict is already imported from dataclasses at the top of the file
+        from datetime import datetime
+        
+        # Get filtered conversation history (only user-facing messages)
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        conversation_history = await orchestrator.build_conversational_history(session_id)
+        planner_transcript = conversation_history if conversation_history else transcript
+        
+        return {
+            "gate_state": asdict(gate_state) if isinstance(gate_state, GateState) else gate_state,
+            "summary": gate_state.summary,
+            "gates": {
+                k: {
+                    "classified": v.classified,
+                    "raw": v.raw,
+                    "confidence": v.confidence
+                }
+                for k, v in gate_state.gates.items()
+            },
+            "transcript_snapshot": planner_transcript[-10:],  # Last 10 messages
+            "rag_data": rag_data,
+            "strategy": strategy,
+            "captured_at": datetime.now().isoformat(),
+            "session_id": session_id
+        }
 
-    async def append_message(self, session_id: int, role: str, content: str) -> None:
+    async def append_message(self, session_id: int, role: str, content: str) -> Dict[str, Any]:
         """
         Appends a message to the session transcript.
         """
@@ -550,6 +711,138 @@ class ShapingManager:
         # Load previous gate state
         previous_state = await self._load_gate_state(session_id)
         
+        # Check if we're waiting for gate confirmation (gates complete but not confirmed)
+        if previous_state and previous_state.status.pass_:
+            # Gates were complete - check if user is confirming or editing
+            user_text_lower = transcript[-1]['content'].lower().strip()
+            
+            # Detect confirmation phrases
+            confirmation_phrases = ["okay", "ok", "yes", "correct", "that's right", "proceed", 
+                                   "that works", "looks good", "sounds good", "confirmed", "good", "fine"]
+            is_confirmation = any(phrase in user_text_lower for phrase in confirmation_phrases)
+            
+            # Detect edit requests
+            edit_phrases = ["edit", "change", "modify", "update", "wrong", "incorrect", "fix", "no", "not"]
+            is_edit = any(phrase in user_text_lower for phrase in edit_phrases)
+            
+            if is_confirmation:
+                # User confirmed - mark as confirmed and proceed with planning phase transition
+                logging.debug(f"[SHAPING_MANAGER] User confirmed gate answers - proceeding to planning phase")
+                
+                # User confirmed - mark as confirmed and let orchestrator handle transition
+                # Mark completion status as confirmed
+                completion_status = {
+                    "is_complete": True,
+                    "completion_reason": "user_confirmed",
+                    "ready_for_handoff": True
+                }
+                
+                # Add confirmation to transcript with completion status (no message - orchestrator will emit planning phase message)
+                transcript.append({
+                    "role": "system", 
+                    "content": "",  # No message - orchestrator will emit planning phase message
+                    "timestamp": "now",
+                    "completion_status": completion_status
+                })
+                
+                # Persist transcript
+                await database.execute(
+                    "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+                    {"transcript": json.dumps(transcript), "id": session_id}
+                )
+                
+                # Emit HANDOFF artifact for planning phase
+                gate_state = await self._load_gate_state(session_id)
+                if gate_state and gate_config:
+                    # CHANGED: No longer use living_document - draft_plan is source of truth
+                    # Get draft_plan from database or generate it
+                    template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
+                    draft_plan = await planner_brain.update_draft(
+                        transcript=transcript,
+                        context={
+                            "gate_state": gate_state,
+                            "gate_config": gate_config,
+                            "session_id": session_id,
+                            "strategy": strategy,
+                            "manuals": [],
+                            "template": template
+                        }
+                    )
+                    await agent.emit("ARTIFACTS", {
+                        "type": "HANDOFF",
+                        "data": {
+                            "status": "confirmed", 
+                            "gate_state": asdict(gate_state) if isinstance(gate_state, GateState) else gate_state,
+                            "draft_plan": draft_plan  # Use draft_plan instead of living_doc
+                        },
+                        "summary": "User confirmed gate answers - ready for planning phase"
+                    })
+                
+                # Return early - don't execute gate engine
+                # User confirmed - orchestrator will handle planning phase transition
+                return {
+                    "raw_message": "",  # No message - orchestrator will emit planning phase message
+                    "buttons": None,
+                    "button_context": None,
+                    "button_metadata": None,
+                    "completion_status": completion_status,
+                    "gate_state": gate_state
+                }
+            
+            elif is_edit:
+                # User wants to edit - reset pass status to allow editing
+                logging.debug(f"[SHAPING_MANAGER] User wants to edit gate answers - resetting gate state")
+                
+                edit_message = "I can help you update your answers. Which information would you like to change?\n\n"
+                edit_message += "You can say things like:\n"
+                edit_message += "• \"Change the urgency to...\"\n"
+                edit_message += "• \"Update the use case to...\"\n"
+                edit_message += "• \"The patient info should be...\"\n\n"
+                edit_message += "Or just tell me what needs to be corrected."
+                
+                # Reset gate state to allow editing (clear pass status)
+                reset_gate_state = GateState(
+                    summary=previous_state.summary,
+                    gates=previous_state.gates,
+                    status=StatusInfo(
+                        pass_=False,  # Reset to allow editing
+                        next_gate=None,
+                        next_query=None
+                    )
+                )
+                await self._save_gate_state(session_id, reset_gate_state)
+                
+                # Persist transcript
+                await database.execute(
+                    "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+                    {"transcript": json.dumps(transcript), "id": session_id}
+                )
+                
+                # Return edit message - orchestrator will format and emit
+                return {
+                    "raw_message": edit_message,
+                    "buttons": None,
+                    "button_context": None,
+                    "button_metadata": None,
+                    "completion_status": None,
+                    "gate_state": reset_gate_state
+                }
+            else:
+                # User said something else - treat as edit request and continue with gate execution
+                logging.debug(f"[SHAPING_MANAGER] User response unclear - treating as edit request")
+                # Reset pass status to allow processing
+                reset_gate_state = GateState(
+                    summary=previous_state.summary,
+                    gates=previous_state.gates,
+                    status=StatusInfo(
+                        pass_=False,  # Reset to allow editing
+                        next_gate=None,
+                        next_query=None
+                    )
+                )
+                await self._save_gate_state(session_id, reset_gate_state)
+                # Continue with gate execution to process the change
+        
         # Execute gate
         await agent.emit("THINKING", {"message": "Executing gate engine..."})
         
@@ -578,248 +871,234 @@ class ShapingManager:
             except Exception:
                 rag_data = []
         
-        # Trigger planner in parallel immediately after gate state update
-        # This ensures the draft plan stays in sync with the latest gate_state.summary
-        asyncio.create_task(self._trigger_planner_after_gate(
-            session_id=session_id,
-            gate_state=gate_result.proposed_state,
-            transcript=transcript,
-            strategy=strategy,
-            rag_data=rag_data
-        ))
+        # --- EMIT ARTIFACTS FOR LIVE BUILDER (After Each Gate Execution) ---
+        # Every time user reacts, gate agent emits for live builder to capture and update
+        # Live builder will update plan deterministically (no LLM call)
+        # CONTRACT: Gate Agent retrieves template and passes it to planner
+        template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
+        try:
+            updated_draft = await planner_brain.update_draft(
+                transcript=transcript,
+                context={
+                    "gate_state": gate_result.proposed_state,
+                    "gate_config": gate_config,  # Pass gate_config for gate metadata
+                    "session_id": session_id,
+                    "strategy": strategy,
+                    "manuals": rag_data,
+                    "template": template  # CONTRACT: Gate Agent passes template to planner
+                }
+            )
+            
+            # Emit ARTIFACTS for live builder to update
+            await agent.emit("ARTIFACTS", {
+                "type": "DRAFT_PLAN",
+                "data": updated_draft,
+                "summary": f"Draft plan updated with gate state (gate: {gate_result.next_gate or 'complete'})"
+            })
+            
+            logging.debug(f"[SHAPING_MANAGER] Emitted ARTIFACTS for live builder after gate execution")
+        except Exception as e:
+            logging.error(f"[SHAPING_MANAGER] Live builder update failed: {e}", exc_info=True)
         
-        # Format response (raw gate response)
+        # NOTE: Planner should NOT make LLM calls during gate stage
+        # It will only make LLM calls after user confirms (handled by orchestrator)
+        
+        # Format response (raw gate response) - return raw, orchestrator will format
         raw_ai_reply = await self._format_gate_response(gate_result, user_id=user_id, session_id=session_id)
-        plan_data = None  # Will be created from gate_state if needed
+        
+        # Initialize return data structure
+        buttons = None
+        button_context = None
+        button_metadata = None
         completion_status = {
             "is_complete": gate_result.pass_,
             "completion_reason": gate_result.decision.value if hasattr(gate_result.decision, 'value') else str(gate_result.decision),
             "ready_for_handoff": gate_result.pass_
         }
-        thought_content = None
-
-        # Format through conversational agent BEFORE saving to transcript
-        formatted_ai_reply = raw_ai_reply  # Default to raw if formatting fails
         
-        # Ensure we always format completion messages through conversational agent
-        # If response is empty or just whitespace, create a meaningful completion message
-        if not raw_ai_reply or not raw_ai_reply.strip():
-            raw_ai_reply = "All required information has been collected. Ready to proceed with workflow planning."
-        
-        try:
-            from nexus.brains.conversational_agent import conversational_agent
+        # CRITICAL: If gates are complete, build confirmation message and buttons
+        if gate_result.pass_:
+            # Gates complete - show dynamic summary and ask for confirmation
+            gate_state = gate_result.proposed_state
             
-            logging.debug(f"[SHAPING_MANAGER] Formatting response through conversational agent (length: {len(raw_ai_reply)})")
-            formatted_ai_reply = await conversational_agent.format_response(
-                raw_response=raw_ai_reply,
-                user_id=user_id,
-                context={"operation": "chat_response", "source": "gate_engine", "session_id": session_id}
-            )
-            logging.debug(f"[SHAPING_MANAGER] Conversational agent returned formatted response (length: {len(formatted_ai_reply)})")
-        except Exception as e:
-            logging.error(f"[SHAPING_MANAGER] Conversational agent formatting failed during append_message: {e}", exc_info=True)
-            formatted_ai_reply = raw_ai_reply
-
-        # Emit the formatted OUTPUT (already formatted, so emit directly)
-        await agent.emit("OUTPUT", {"role": "system", "content": formatted_ai_reply})
+            # Build dynamic summary of collected answers
+            summary_parts = ["## Summary of Collected Information\n\n"]
+            summary_parts.append(f"**Problem Statement:** {gate_state.summary}\n\n")
+            summary_parts.append("**Your Answers:**\n\n")
+            
+            # Dynamically iterate through all gates in order
+            for gate_key in gate_config.gate_order:
+                gate_def = gate_config.gates.get(gate_key)
+                gate_value = gate_state.gates.get(gate_key)
+                
+                if gate_def and gate_value and gate_value.classified:
+                    summary_parts.append(f"**{gate_def.question}**\n")
+                    summary_parts.append(f"→ {gate_value.classified}")
+                    if gate_value.raw:
+                        summary_parts.append(f" (from: \"{gate_value.raw}\")")
+                    summary_parts.append("\n\n")
+            
+            summary_parts.append("---\n\n")
+            summary_parts.append("**Please review the information above.**\n\n")
+            summary_parts.append("Is this correct?")
+            
+            raw_ai_reply = "".join(summary_parts)
+            
+            # --- EMIT ARTIFACTS WITH PROBLEM STATEMENT (Confirmation Summary) ---
+            # The confirmation summary becomes the problem statement for live builder
+            problem_statement = gate_state.summary  # This is the synthesized summary
+            
+            # Emit PROBLEM_STATEMENT artifact
+            await agent.emit("ARTIFACTS", {
+                "type": "PROBLEM_STATEMENT",
+                "data": {
+                    "problem_statement": problem_statement,
+                    "gate_state": asdict(gate_state) if isinstance(gate_state, GateState) else gate_state
+                },
+                "summary": "Problem statement finalized from gate collection"
+            })
+            
+            # Update draft plan with this problem statement (no LLM call)
+            # CONTRACT: Gate Agent retrieves template and passes it to planner
+            template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
+            try:
+                updated_draft = await planner_brain.update_draft(
+                    transcript=transcript,
+                    context={
+                        "gate_state": gate_state,
+                        "gate_config": gate_config,  # Pass gate_config for gate metadata
+                        "session_id": session_id,
+                        "strategy": strategy,
+                        "manuals": rag_data,
+                        "problem_statement": problem_statement,  # Explicit problem statement from confirmation
+                        "template": template  # CONTRACT: Gate Agent passes template to planner
+                    }
+                )
+                
+                # Emit updated draft plan with problem statement
+                await agent.emit("ARTIFACTS", {
+                    "type": "DRAFT_PLAN",
+                    "data": updated_draft,
+                    "summary": "Draft plan updated with final problem statement"
+                })
+                
+                logging.debug(f"[SHAPING_MANAGER] Emitted problem statement and updated draft plan for live builder")
+            except Exception as e:
+                logging.error(f"[SHAPING_MANAGER] Failed to update draft with problem statement: {e}", exc_info=True)
+            
+            # Build confirmation buttons (don't emit - return for orchestrator)
+            buttons = [
+                {
+                    "id": "gate_confirm_yes",
+                    "label": "Confirm & Proceed",
+                    "variant": "primary",
+                    "action": {
+                        "type": "api_call",
+                        "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                        "method": "POST",
+                        "payload": {
+                            "message": "okay",
+                            "user_id": user_id or "user_123"
+                        }
+                    },
+                    "enabled": True,
+                    "icon": "check",
+                    "tooltip": "Confirm the information is correct and proceed to planning"
+                },
+                {
+                    "id": "gate_confirm_edit",
+                    "label": "Edit Answers",
+                    "variant": "secondary",
+                    "action": {
+                        "type": "api_call",
+                        "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                        "method": "POST",
+                        "payload": {
+                            "message": "edit",
+                            "user_id": user_id or "user_123"
+                        }
+                    },
+                    "enabled": True,
+                    "icon": "edit",
+                    "tooltip": "Modify your answers"
+                }
+            ]
+            button_context = "gate_confirmation"
+            button_metadata = {"gate_key": "confirmation", "session_id": session_id}
+            
+            # Mark that we're waiting for confirmation (don't transition yet)
+            completion_status = {
+                "is_complete": False,  # Not complete until user confirms
+                "completion_reason": "awaiting_user_confirmation",
+                "ready_for_handoff": False  # Don't hand off until confirmed
+            }
+            
+            logging.debug(f"[SHAPING_MANAGER] Gates complete - returning confirmation data")
+        else:
+            # Gates not complete - prepare router buttons for next gate
+            if gate_result.next_gate:
+                # Build router buttons (don't emit - return for orchestrator)
+                gate_def = gate_config.gates.get(gate_result.next_gate)
+                if gate_def and gate_def.expected_categories:
+                    buttons = []
+                    for category in gate_def.expected_categories:
+                        buttons.append({
+                            "id": f"gate_{gate_result.next_gate}_{category.lower().replace(' ', '_').replace('/', '_')}",
+                            "label": category,
+                            "variant": "secondary",
+                            "action": {
+                                "type": "api_call",
+                                "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                                "method": "POST",
+                                "payload": {
+                                    "message": category,
+                                    "user_id": user_id or "user_123"
+                                }
+                            },
+                            "enabled": True,
+                            "tooltip": f"Select: {category}"
+                        })
+                    
+                    # Add "Other" option
+                    buttons.append({
+                        "id": f"gate_{gate_result.next_gate}_other",
+                        "label": "Other",
+                        "variant": "secondary",
+                        "action": {
+                            "type": "event",
+                            "eventName": "gate_other_selected",
+                            "payload": {"gate_key": gate_result.next_gate}
+                        },
+                        "enabled": True,
+                        "tooltip": "Select if none of the above apply"
+                    })
+                    button_context = "gate_question"
+                    button_metadata = {"gate_key": gate_result.next_gate}
         
-        # Emit journey state update after gate execution
-        from nexus.conductors.workflows.orchestrator import orchestrator
-        await orchestrator._emit_journey_state_update(
-            session_id=session_id,
-            gate_state=gate_result.proposed_state,
-            gate_config=gate_config,
-            strategy=strategy
-        )
-        
-        # Persist FORMATTED response in transcript
-        msg_obj = {"role": "system", "content": formatted_ai_reply, "timestamp": "now"}
-        if thought_content:
-            msg_obj["thought"] = thought_content
+        # Persist raw response in transcript (orchestrator will format before emitting)
+        msg_obj = {"role": "system", "content": raw_ai_reply, "timestamp": "now"}
         if completion_status:
             msg_obj["completion_status"] = completion_status
             
         transcript.append(msg_obj)
-        
-        # --- 5. CHECK COMPLETION STATUS ---
-        if completion_status and completion_status.get("is_complete"):
-            await agent.emit("THINKING", {
-                "message": f"Gate collection complete: {completion_status.get('completion_reason', 'unknown')}"
-            })
-            # Reset iteration count on completion (skip if column doesn't exist)
-            try:
-                await database.execute(
-                    "UPDATE shaping_sessions SET consultant_iteration_count = 0 WHERE id = :id",
-                    {"id": session_id}
-                )
-            except Exception as e:
-                logging.debug(f"Could not reset iteration count: {e}")
-            # Hand off to Planner
-            if completion_status.get("ready_for_handoff"):
-                # Load gate_state and convert to living document format
-                gate_state = await self._load_gate_state(session_id)
-                if gate_state and gate_config:
-                    # Use module-level planner_brain import (line 8), not local import
-                    living_doc = planner_brain.map_gate_state_to_living_document(
-                        gate_state=gate_state,
-                        gate_config=gate_config
-                    )
-                    await agent.emit("ARTIFACTS", {
-                        "type": "HANDOFF",
-                        "data": {
-                            "status": "ready", 
-                            "gate_state": asdict(gate_state) if isinstance(gate_state, GateState) else gate_state, 
-                            "living_doc": living_doc
-                        },
-                        "summary": "Ready for Planner handoff"
-                    })
-                
-                # --- TRANSITION TO PLANNING PHASE ---
-                # Emit user-facing message about transition to planning
-                transition_message = "All required information has been collected. Moving to the planning phase to build your workflow."
-                
-                # Format through conversational agent
-                formatted_transition = transition_message
-                try:
-                    from nexus.brains.conversational_agent import conversational_agent
-                    
-                    logging.debug(f"[SHAPING_MANAGER] Formatting planning transition message through conversational agent")
-                    formatted_transition = await conversational_agent.format_response(
-                        raw_response=transition_message,
-                        user_id=user_id,
-                        context={"operation": "planning_transition", "source": "gate_engine", "session_id": session_id}
-                    )
-                except Exception as e:
-                    logging.warning(f"Conversational agent formatting failed for transition message: {e}, using raw response")
-                    formatted_transition = transition_message
-                
-                # Emit the formatted transition message
-                await agent.emit("OUTPUT", {"role": "system", "content": formatted_transition})
-                
-                # Add transition message to transcript
-                transcript.append({"role": "system", "content": formatted_transition, "timestamp": "now"})
-                
-                # Persist transcript with transition message
-                transcript_query = "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id"
-                await database.execute(query=transcript_query, values={
-                    "transcript": json.dumps(transcript),
-                    "id": session_id
-                })
-                await agent.emit("PERSISTENCE", {"action": "UPDATE_TRANSCRIPT", "id": session_id})
-                
-                # --- INVOKE PLANNER (STUB) ---
-                await agent.emit("THINKING", {"message": "Invoking Planner (Engineer) to build workflow plan..."})
-                
-                # Get RAG data from session
-                rag_query = "SELECT rag_citations FROM shaping_sessions WHERE id = :id"
-                rag_row = await database.fetch_one(rag_query, {"id": session_id})
-                rag_data = []
-                if rag_row:
-                    rag_dict = dict(rag_row)
-                    citations_str = rag_dict.get("rag_citations", "[]")
-                    try:
-                        rag_data = json.loads(citations_str) if isinstance(citations_str, str) else citations_str
-                    except Exception:
-                        rag_data = []
-                
-                # Build context for planner
-                planner_context = {
-                    "manuals": rag_data,
-                    "session_id": session_id,
-                    "strategy": strategy
-                }
-                
-                # STUB: Invoke planner (for now, just emit thinking and artifact)
-                # TODO: Replace with actual planner invocation
-                try:
-                    # Get filtered conversation history for planner
-                    from nexus.conductors.workflows.orchestrator import orchestrator
-                    conversation_history = await orchestrator.build_conversational_history(session_id)
-                    
-                    # Use conversation_history instead of full transcript for planner
-                    planner_transcript = conversation_history if conversation_history else transcript
-                    
-                    # STUB: For now, create a placeholder plan
-                    # In production, this would call: new_draft = await planner_brain.update_draft(planner_transcript, planner_context)
-                    await agent.emit("THINKING", {"message": "Planner (Engineer) is analyzing requirements and building workflow plan..."})
-                    
-                    # Placeholder draft plan
-                    placeholder_draft = {
-                        "name": "Workflow Plan (Draft)",
-                        "goal": "Workflow plan is being generated based on collected information",
-                        "steps": [],
-                        "missing_info": [],
-                        "status": "drafting"
-                    }
-                    
-                    # Emit placeholder artifact
-                    await agent.emit("ARTIFACTS", {
-                        "type": "DRAFT_PLAN",
-                        "data": placeholder_draft,
-                        "summary": "Planner is building workflow plan..."
-                    })
-                    
-                    # TODO: Uncomment when ready to invoke actual planner
-                    # new_draft = await planner_brain.update_draft(planner_transcript, planner_context)
-                    # 
-                    # # Emit the actual draft plan
-                    # await agent.emit("ARTIFACTS", {
-                    #     "type": "DRAFT_PLAN",
-                    #     "data": new_draft,
-                    #     "summary": f"Workflow plan created with {len(new_draft.get('steps', []))} steps"
-                    # })
-                    # 
-                    # # Persist draft plan
-                    # draft_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
-                    # await database.execute(query=draft_query, values={
-                    #     "draft": json.dumps(new_draft),
-                    #     "id": session_id
-                    # })
-                    # await agent.emit("PERSISTENCE", {"action": "UPDATE_PLAN", "id": session_id})
-                    
-                except Exception as e:
-                    logging.error(f"Planner invocation failed: {e}", exc_info=True)
-                    await agent.emit("THINKING", {"message": f"Planner encountered an error: {str(e)}"})
-            
-            # RETURN EARLY - gates are complete, planner has been invoked
-            return
 
-        # --- 4. PERSIST TRANSCRIPT (Immediate UX) ---
-        # We save the chat history NOW so the user sees the reply while the Planner thinks
+        # Persist transcript immediately so orchestrator can see completion_status
         transcript_query = "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id"
         await database.execute(query=transcript_query, values={
             "transcript": json.dumps(transcript),
             "id": session_id
         })
-        await agent.emit("PERSISTENCE", {"action": "UPDATE_TRANSCRIPT", "id": session_id})
-
-        # --- 5. PLANNER UPDATE (Backgroundable) ---
-        await agent.emit("THINKING", {"message": "Consultant finished. Triggering Planner for Draft Update..."})
         
-        # We yield to the planner now. 
-        # Ideally this could be backgrounded entirely if we didn't care about the final draft_plan consistency *in this request scope*.
-        # But for reliability, awaiting it is fine IF we already saved the chat.
+        # Return raw data for orchestrator to format and emit
+        return {
+            "raw_message": raw_ai_reply,
+            "buttons": buttons,
+            "button_context": button_context,
+            "button_metadata": button_metadata,
+            "completion_status": completion_status,
+            "gate_state": gate_result.proposed_state
+        }
         
-        # Load gate_state if available
-        gate_state = await self._load_gate_state(session_id)
-        context = {"manuals": rag_data, "gate_state": gate_state, "session_id": session_id, "strategy": strategy}
-        
-        new_draft = await planner_brain.update_draft(transcript, context)
-        
-        # EMIT THE ARTIFACT
-        await agent.emit("ARTIFACTS", {
-            "type": "DRAFT_PLAN", 
-            "data": new_draft, 
-            "summary": f"Updated plan with {len(new_draft.get('steps', []))} steps"
-        })
-
-        # 6. Update DB (Draft Plan)
-        draft_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
-        await database.execute(query=draft_query, values={
-            "draft": json.dumps(new_draft),
-            "id": session_id
-        })
-        await agent.emit("PERSISTENCE", {"action": "UPDATE_PLAN", "id": session_id})
 
     async def get_session(self, session_id: int) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM shaping_sessions WHERE id = :id"

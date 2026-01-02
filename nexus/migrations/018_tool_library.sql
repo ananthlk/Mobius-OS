@@ -90,3 +90,4 @@ COMMENT ON TABLE tools IS 'Tool library for workflow builder - stores all availa
 COMMENT ON TABLE tool_parameters IS 'Normalized tool parameters for better querying and validation';
 COMMENT ON TABLE tool_usage_logs IS 'Tracks tool usage for analytics and debugging';
 
+

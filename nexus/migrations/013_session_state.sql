@@ -14,3 +14,4 @@ CREATE TABLE IF NOT EXISTS session_state (
 CREATE INDEX IF NOT EXISTS idx_session_state_session_id ON session_state(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_state_key ON session_state(state_key);
 
+

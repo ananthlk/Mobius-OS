@@ -104,3 +104,4 @@ async def log_single_message(
         logger.error(f"Failed to log message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+

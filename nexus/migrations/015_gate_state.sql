@@ -14,3 +14,4 @@ ON shaping_sessions USING GIN (gate_state);
 COMMENT ON COLUMN shaping_sessions.gate_state IS 
 'Stores GateState JSON structure: {summary, gates: {gate_key: {raw, classified}}, status: {pass, next_gate, next_query}}';
 
+

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Send, Bot, User } from "lucide-react";
 import ThinkingContainer from "@/components/ThinkingContainer";
 import Tooltip from "@/components/Tooltip";
+import ActionButtons from "./ActionButtons";
 
 interface Message {
     id: string;
@@ -19,19 +20,51 @@ interface ShapingChatProps {
     onUpdate: (query: string) => void;
     onSessionUpdate?: (data: any) => void; // New callback for full state sync
     sessionId?: number | null;
+    progressState?: { status?: string }; // Add progress state to detect planning phase
 }
 
-export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, sessionId }: ShapingChatProps) {
+export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, sessionId, progressState }: ShapingChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [currentThinkingId, setCurrentThinkingId] = useState<string | null>(null); // Track active thinking container ID
     const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set()); // Track which thinking blocks are expanded
     const [explicitlyCollapsedIds, setExplicitlyCollapsedIds] = useState<Set<string>>(new Set()); // Track which thinking blocks are explicitly collapsed by user
     const [userOverriddenIds, setUserOverriddenIds] = useState<Set<string>>(new Set()); // Track containers user explicitly expanded after system collapse
+    const [actionButtons, setActionButtons] = useState<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const isUserScrollingRef = useRef(false);
     const lastMessageCountRef = useRef(0);
     const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    
+    // Memoize action complete handler to prevent unnecessary re-renders
+    const handleActionComplete = useCallback((buttonId: string, result: any) => {
+        console.log(`Action button ${buttonId} completed:`, result);
+        
+        // Clear buttons after successful action
+        if (result && result.status === 'success') {
+            setActionButtons(null);
+            
+            // If there's a next_step, trigger it
+            if (result.next_step === 'compute_plan' && sessionId) {
+                // Trigger compute plan step
+                const triggerNextStep = async () => {
+                    try {
+                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                        const response = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}/planning-phase/compute`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                        });
+                        const computeResult = await response.json();
+                        console.log('Compute plan result:', computeResult);
+                    } catch (error) {
+                        console.error('Failed to trigger compute plan:', error);
+                    }
+                };
+                // Small delay to ensure decision is saved
+                setTimeout(triggerNextStep, 500);
+            }
+        }
+    }, [sessionId]);
 
     // Check if user is near bottom of scroll (within 100px)
     const isNearBottom = (element: HTMLDivElement): boolean => {
@@ -139,6 +172,28 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                     if (data.transcript && Array.isArray(data.transcript)) {
                         // Pass full state up to parent (for Left Rail sync)
                         if (onSessionUpdate) onSessionUpdate(data);
+                        
+                        // Check for ACTION_BUTTONS artifacts - only update if changed
+                        // Backend should filter out buttons if decision is made, but we also check here
+                        const currentButtonArtifact = data.latest_action_buttons || 
+                            (data.artifacts && Array.isArray(data.artifacts) 
+                                ? data.artifacts.find((a: any) => a.type === 'ACTION_BUTTONS')
+                                : null);
+                        
+                        if (currentButtonArtifact) {
+                            setActionButtons((prev: any) => {
+                                // Compare by stringifying to avoid unnecessary updates
+                                const prevStr = JSON.stringify(prev);
+                                const newStr = JSON.stringify(currentButtonArtifact);
+                                if (prevStr !== newStr) {
+                                    return currentButtonArtifact;
+                                }
+                                return prev;
+                            });
+                        } else {
+                            // No action buttons in response - clear them (decision might have been made)
+                            setActionButtons(null);
+                        }
 
                         // Update thinking container with thinking messages (if active and not collapsed)
                         if (data.latest_thought && currentThinkingId) {
@@ -421,10 +476,12 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
         <div className="flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden relative">
             {/* Header */}
             <div className="p-4 border-b-2 border-gray-300 bg-gradient-to-b from-gray-50 to-white flex items-center gap-2 shadow-sm">
-                <Tooltip content="AI agent that helps define and shape your workflow problem through conversation">
+                <Tooltip content={progressState?.status === "PLANNING" ? "Planning Phase Agent - Review and refine your workflow plan" : "AI agent that helps define and shape your workflow problem through conversation"}>
                     <Bot className="w-5 h-5 text-blue-600 cursor-help" />
                 </Tooltip>
-                <span className="text-sm font-bold text-gray-700 uppercase tracking-wider">Problem Shaping Agent</span>
+                <span className="text-sm font-bold text-gray-700 uppercase tracking-wider">
+                    {progressState?.status === "PLANNING" ? "Planning Phase" : "Problem Shaping Agent"}
+                </span>
             </div>
 
             {/* Chat Area */}
@@ -515,9 +572,20 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                         </div>
                             </div>
                         </div>
-                    );
-                })}
-            </div>
+                            );
+                        })}
+                        
+                        {/* Render action buttons after messages */}
+                        {actionButtons && actionButtons.buttons && (
+                            <ActionButtons
+                                buttons={actionButtons.buttons}
+                                context={actionButtons.context}
+                                message={actionButtons.message}
+                                sessionId={sessionId}
+                                onActionComplete={handleActionComplete}
+                            />
+                        )}
+                    </div>
 
             {/* Input Area */}
             <div className="p-4 border-t-2 border-gray-300 bg-white">

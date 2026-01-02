@@ -86,6 +86,30 @@ body {
   }
 }
 
+@keyframes dots {
+  0%, 20% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-dots-1 {
+  animation: dots 1.4s infinite;
+}
+
+.animate-dots-2 {
+  animation: dots 1.4s infinite 0.2s;
+}
+
+.animate-dots-3 {
+  animation: dots 1.4s infinite 0.4s;
+}
+
 /* Custom Scrollbar Styling */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;

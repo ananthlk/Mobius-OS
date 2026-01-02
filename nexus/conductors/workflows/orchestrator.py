@@ -243,12 +243,245 @@ class WorkflowOrchestrator(BaseOrchestrator):
                 db = self._get_database()
                 gate_state_query = "SELECT gate_state FROM shaping_sessions WHERE id = :sid"
                 gate_state_row = await db.fetch_one(query=gate_state_query, values={"sid": session_id})
-                # Fix: Use dict-style access for Record objects instead of .get()
+                
                 if gate_state_row and "gate_state" in gate_state_row and gate_state_row["gate_state"]:
-                    session["gate_state"] = gate_state_row["gate_state"]
+                    gate_state_raw = gate_state_row["gate_state"]
+                    
+                    # Parse JSONB if it's a string (PostgreSQL returns JSONB as dict, but handle string case)
+                    if isinstance(gate_state_raw, str):
+                        try:
+                            gate_state_raw = json.loads(gate_state_raw)
+                        except (json.JSONDecodeError, TypeError):
+                            # If parsing fails, keep as string (shouldn't happen with JSONB, but safe)
+                            pass
+                    
+                    session["gate_state"] = gate_state_raw
+                    self.logger.debug(f"[ORCHESTRATOR] Loaded gate_state for session {session_id}: next_gate={gate_state_raw.get('status', {}).get('next_gate') if isinstance(gate_state_raw, dict) else 'N/A'}")
             except Exception as e:
                 # If gate_state column doesn't exist or query fails, just continue without it
                 self.logger.debug(f"Could not fetch gate_state: {e}")
+            
+            # Get recent ACTION_BUTTONS artifacts from memory_events
+            try:
+                db = self._get_database()
+                
+                # Get current gate step from gate_state (most accurate source)
+                current_gate_key = None
+                current_phase = None
+                gates_complete = False
+                
+                # Try to get gate_state from session
+                gate_state_data = session.get("gate_state")
+                if gate_state_data:
+                    # Handle dict (from JSONB)
+                    if isinstance(gate_state_data, dict):
+                        gate_status = gate_state_data.get("status", {})
+                        current_gate_key = gate_status.get("next_gate")  # e.g., "1_patient_info_availability"
+                        gates_complete = gate_status.get("pass", False)
+                        
+                        if gates_complete:
+                            current_phase = "planning_phase"  # Gates complete, move to planning
+                        elif current_gate_key:
+                            current_phase = "gate_phase"
+                        
+                        self.logger.debug(f"[ORCHESTRATOR] Gate state from dict: current_gate_key={current_gate_key}, gates_complete={gates_complete}, phase={current_phase}")
+                    # If gate_state is a GateState object, extract from it
+                    elif hasattr(gate_state_data, 'status'):
+                        current_gate_key = gate_state_data.status.next_gate
+                        gates_complete = gate_state_data.status.pass_
+                        if gates_complete:
+                            current_phase = "planning_phase"
+                        elif current_gate_key:
+                            current_phase = "gate_phase"
+                        
+                        self.logger.debug(f"[ORCHESTRATOR] Gate state from object: current_gate_key={current_gate_key}, phase={current_phase}")
+                    else:
+                        self.logger.warning(f"[ORCHESTRATOR] Gate state is unexpected type: {type(gate_state_data)}")
+                
+                # Fallback to journey_state if gate_state not available
+                if not current_phase:
+                    from nexus.modules.journey_state import journey_state_manager
+                    journey_state = await journey_state_manager.get_journey_state(session_id)
+                    
+                    if journey_state:
+                        current_step = journey_state.get("current_step", "")
+                        if current_step.startswith("gate_"):
+                            current_phase = "gate_phase"
+                            current_gate_key = current_step.replace("gate_", "", 1)
+                        elif current_step == "gates_complete":
+                            current_phase = "planning_phase"
+                            gates_complete = True
+                        elif current_step == "planning" or "planning" in current_step.lower():
+                            current_phase = "planning_phase"
+                    
+                    # Final fallback to session status
+                    if not current_phase:
+                        session_status = session.get("status", "GATHERING")
+                        if session_status == "GATHERING":
+                            current_phase = "gate_phase"
+                        elif session_status == "PLANNING":
+                            current_phase = "planning_phase"
+                
+                # Check if a planning phase decision has been made (only for planning phase)
+                decision_made = None
+                if current_phase == "planning_phase":
+                    from nexus.core.action_button_handler import should_show_action_buttons
+                    decision_made = not await should_show_action_buttons(
+                        session_id=session_id,
+                        decision_column="planning_phase_decision",
+                        decision_table="shaping_sessions"
+                    )
+                
+                artifacts_query = """
+                    SELECT payload, created_at
+                    FROM memory_events 
+                    WHERE session_id = :sid AND bucket_type = 'ARTIFACTS'
+                    ORDER BY created_at DESC 
+                    LIMIT 50
+                """
+                artifact_results = await db.fetch_all(query=artifacts_query, values={"sid": session_id})
+                
+                if artifact_results:
+                    import json
+                    artifacts = []
+                    latest_action_buttons = None
+                    latest_gate_buttons = {}  # Track most recent buttons per gate_key
+                    latest_draft_plan = None  # Track latest DRAFT_PLAN artifact
+                    latest_draft_plan_created_at = None
+                    
+                    for row in artifact_results:
+                        result_dict = dict(row)
+                        payload = result_dict.get("payload")
+                        created_at = result_dict.get("created_at")
+                        
+                        # Parse JSONB if needed
+                        if isinstance(payload, str):
+                            try:
+                                payload = json.loads(payload)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                        
+                        if isinstance(payload, dict):
+                            artifact_type = payload.get("type")
+                            
+                            # Extract latest DRAFT_PLAN artifact
+                            if artifact_type == "DRAFT_PLAN":
+                                if latest_draft_plan_created_at is None or created_at > latest_draft_plan_created_at:
+                                    latest_draft_plan = payload.get("data")
+                                    latest_draft_plan_created_at = created_at
+                                # Don't add to artifacts array (we'll merge it into session separately)
+                                continue
+                            
+                            if artifact_type == "ACTION_BUTTONS":
+                                button_context = payload.get("context", "")
+                                button_metadata = payload.get("metadata", {})
+                                
+                                # For gate_confirmation context, show when gates complete but not confirmed
+                                # Check transcript for confirmation status instead of relying on phase
+                                if button_context == "gate_confirmation" and gates_complete:
+                                    # Check if user has confirmed by looking at transcript
+                                    awaiting_confirmation = False
+                                    user_confirmed = False
+                                    
+                                    if session.get("transcript"):
+                                        transcript = session.get("transcript", [])
+                                        # Check last few messages for confirmation status
+                                        last_few = transcript[-5:] if len(transcript) >= 5 else transcript
+                                        for msg in last_few:
+                                            if isinstance(msg, dict):
+                                                completion_status = msg.get("completion_status", {})
+                                                completion_reason = completion_status.get("completion_reason", "")
+                                                
+                                                # Check if we're awaiting confirmation
+                                                if completion_reason == "awaiting_user_confirmation":
+                                                    awaiting_confirmation = True
+                                                
+                                                # Check if user has confirmed
+                                                if completion_reason == "user_confirmed":
+                                                    user_confirmed = True
+                                                    awaiting_confirmation = False
+                                                    break
+                                    
+                                    # Show confirmation buttons when gates complete but awaiting confirmation
+                                    if awaiting_confirmation and not user_confirmed and latest_action_buttons is None:
+                                        latest_action_buttons = payload
+                                        self.logger.info(f"[ORCHESTRATOR] ✅ Matched gate confirmation buttons (gates complete, awaiting confirmation)")
+                                
+                                # For gate_question context, match to current gate step
+                                elif button_context == "gate_question" and current_phase == "gate_phase":
+                                    button_gate_key = button_metadata.get("gate_key")
+                                    
+                                    self.logger.debug(f"[ORCHESTRATOR] Checking button: button_gate_key={button_gate_key}, current_gate_key={current_gate_key}, gates_complete={gates_complete}")
+                                    
+                                    # Only show buttons if they match current gate step
+                                    if current_gate_key and button_gate_key == current_gate_key:
+                                        # Track most recent buttons for this gate_key
+                                        # Since we iterate DESC, first match is most recent
+                                        if button_gate_key not in latest_gate_buttons:
+                                            latest_gate_buttons[button_gate_key] = payload
+                                            self.logger.info(f"[ORCHESTRATOR] ✅ Matched buttons for gate '{button_gate_key}'")
+                                    # If gates complete, don't show any gate buttons
+                                    elif gates_complete:
+                                        self.logger.debug(f"[ORCHESTRATOR] Skipping gate buttons - gates complete")
+                                        pass  # Skip gate buttons when gates are complete
+                                    elif button_gate_key != current_gate_key:
+                                        self.logger.debug(f"[ORCHESTRATOR] Skipping buttons for gate '{button_gate_key}' - not current gate '{current_gate_key}'")
+                                
+                                # For planning_phase_decision context, match to planning phase
+                                elif button_context == "planning_phase_decision" and current_phase == "planning_phase":
+                                    button_metadata = payload.get("metadata", {})
+                                    button_phase = button_metadata.get("phase")
+                                    
+                                    # decision_made = False means no decision made, show buttons
+                                    # Use same pattern as gate buttons - check metadata
+                                    if decision_made is False and button_phase == "planning":
+                                        if latest_action_buttons is None:
+                                            latest_action_buttons = payload
+                                            self.logger.info(f"[ORCHESTRATOR] ✅ Matched planning phase buttons")
+                                
+                                # Don't add to artifacts array
+                                continue
+                            artifacts.append(payload)
+                    
+                    # After processing all artifacts, select buttons for current gate OR confirmation
+                    if current_phase == "gate_phase":
+                        if gates_complete and latest_action_buttons is None:
+                            # If gates complete but no confirmation buttons found yet, 
+                            # they should have been set above, but this is a fallback
+                            # (Confirmation buttons should be set in the loop above)
+                            pass
+                        elif current_gate_key:
+                            # Get the most recent buttons for the current gate step
+                            if current_gate_key in latest_gate_buttons:
+                                latest_action_buttons = latest_gate_buttons[current_gate_key]
+                    
+                    session["artifacts"] = artifacts
+                    
+                    # Merge latest DRAFT_PLAN artifact into session (prefer artifact over DB if newer)
+                    if latest_draft_plan:
+                        # If we have a DRAFT_PLAN artifact, use it (it's the most up-to-date)
+                        session["draft_plan"] = latest_draft_plan
+                        self.logger.debug(f"[ORCHESTRATOR] ✅ Merged latest DRAFT_PLAN artifact into session (created_at: {latest_draft_plan_created_at})")
+                    elif session.get("draft_plan"):
+                        # If no artifact but DB has draft_plan, keep it
+                        self.logger.debug(f"[ORCHESTRATOR] Using draft_plan from database (no newer artifact found)")
+                    else:
+                        # No draft_plan at all
+                        session["draft_plan"] = None
+                    
+                    # Include latest action buttons if they match current phase/step
+                    if latest_action_buttons:
+                        session["latest_action_buttons"] = latest_action_buttons
+                    else:
+                        session["latest_action_buttons"] = None
+                else:
+                    session["artifacts"] = []
+                    session["latest_action_buttons"] = None
+            except Exception as e:
+                # If memory_events table doesn't exist or query fails, just continue without artifacts
+                self.logger.debug(f"Could not fetch artifacts: {e}")
+                session["artifacts"] = []
+                session["latest_action_buttons"] = None
             
             # Get journey state from dedicated table
             try:
@@ -298,38 +531,318 @@ class WorkflowOrchestrator(BaseOrchestrator):
         """
         Handle a chat message in a shaping session.
         Coordinates ShapingManager, DiagnosisBrain, and PlannerBrain.
+        Routes to planning phase if gates are complete, otherwise continues with gate flow.
         Returns: {reply, trace_id}
         """
+        logger.debug(f"[WorkflowOrchestrator.handle_chat_message] ENTRY | session_id={session_id}, message_length={len(message)}")
         self._log_operation("handle_chat_message", {"session_id": session_id, "user_id": user_id})
         
         try:
-            # 1. Process chat via ShapingManager (this handles the LLM call and response)
-            await self.shaping_manager.append_message(session_id, "user", message)
+            # Check if gates are already complete AND user has confirmed - if so, route to planning phase
+            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Checking gate state")
+            gate_state = await self.shaping_manager._load_gate_state(session_id)
             
-            # 2. Get current transcript for analysis
+            # Check if user has explicitly confirmed (look at last transcript message)
             session = await self.shaping_manager.get_session(session_id)
             transcript = session.get("transcript", []) if session else []
             
-            # 3. Trigger workflow analysis (parallel) - re-analyze existing workflows
+            # Check if there's a confirmation in recent transcript messages
+            has_confirmation = False
+            if transcript:
+                last_few_messages = transcript[-3:] if len(transcript) >= 3 else transcript
+                for msg in last_few_messages:
+                    if isinstance(msg, dict):
+                        completion_status = msg.get("completion_status", {})
+                        if completion_status.get("completion_reason") == "user_confirmed":
+                            has_confirmation = True
+                            break
+            
+            if gate_state and gate_state.status.pass_ and has_confirmation:
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Gates complete and confirmed - routing to planning phase")
+                # Gates complete - route to planning phase
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Creating BaseAgent for planning phase")
+                from nexus.core.base_agent import BaseAgent
+                agent = BaseAgent(session_id=session_id)
+                
+                # Emit planning phase transition message if not already done
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Detecting planning phase transition")
+                await self._detect_planning_phase_transition(session_id)
+                
+                # Format planning phase start message (per UX spec)
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Formatting planning phase start message")
+                transition_message = """🎯 Planning Phase Started
+
+We've gathered all the information we need. Now let's build your workflow plan.
+
+First, would you like to:
+• Build a new workflow from scratch
+• Reuse an existing workflow from your repository
+
+Please let me know which option you prefer."""
+                
+                try:
+                    from nexus.brains.conversational_agent import conversational_agent
+                    formatted_message = await conversational_agent.format_response(
+                        raw_response=transition_message,
+                        user_id=user_id,
+                        context={"operation": "planning_phase_transition", "source": "orchestrator", "session_id": session_id}
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Conversational agent formatting failed: {e}")
+                    formatted_message = transition_message
+                
+                # Get current transcript and add user message (gates already complete, so we don't call append_message)
+                session = await self.shaping_manager.get_session(session_id)
+                transcript = session.get("transcript", []) if session else []
+                transcript.append({"role": "user", "content": message, "timestamp": "now"})
+                
+                # Emit user message
+                await agent.emit("OUTPUT", {"role": "user", "content": message})
+                
+                # Emit planning phase response
+                await agent.emit("OUTPUT", {"role": "system", "content": formatted_message})
+                
+                # Emit Build/Reuse decision buttons using ActionButtonHandler
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Emitting Build/Reuse decision buttons")
+                from nexus.core.action_button_handler import ActionButtonHandler
+                
+                handler = ActionButtonHandler(agent)
+                
+                buttons = [
+                    {
+                        "id": "build_new",
+                        "label": "Build New Workflow",
+                        "variant": "primary",
+                        "action": {
+                            "type": "api_call",
+                            "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                            "method": "POST",
+                            "payload": {
+                                "choice": "build_new",
+                                "user_id": user_id
+                            }
+                        },
+                        "enabled": True,
+                        "icon": "add"
+                    },
+                    {
+                        "id": "reuse",
+                        "label": "Reuse from Repository",
+                        "variant": "secondary",
+                        "action": {
+                            "type": "api_call",
+                            "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                            "method": "POST",
+                            "payload": {
+                                "choice": "reuse",
+                                "user_id": user_id
+                            }
+                        },
+                        "enabled": False,
+                        "tooltip": "Coming soon"
+                    }
+                ]
+                
+                await handler.emit_decision_buttons(
+                    buttons=buttons,
+                    decision_column="planning_phase_decision",
+                    decision_table="shaping_sessions",
+                    message="First, would you like to:",
+                    context="planning_phase_decision",
+                    metadata={"phase": "planning", "step": "build_reuse_decision"}
+                )
+                
+                # Add system response to transcript
+                transcript.append({"role": "system", "content": formatted_message, "timestamp": "now"})
+                
+                # Persist transcript
+                await database.execute(
+                    "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+                    {"transcript": json.dumps(transcript), "id": session_id}
+                )
+                
+                # Return planning phase response
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] EXIT | Returning planning phase response")
+                return {
+                    "reply": formatted_message,
+                    "trace_id": None
+                }
+            
+            # Gates not complete - continue with normal gate flow
+            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Gates not complete - continuing with gate flow")
+            # 1. Process chat via ShapingManager (returns raw data)
+            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Calling shaping_manager.append_message")
+            result = await self.shaping_manager.append_message(session_id, "user", message)
+            
+            # 2. Format and emit response through orchestrator
+            if result:
+                await self._format_and_emit_response(
+                    session_id=session_id,
+                    user_id=user_id,
+                    raw_message=result.get("raw_message", ""),
+                    buttons=result.get("buttons"),
+                    button_context=result.get("button_context"),
+                    button_metadata=result.get("button_metadata")
+                )
+            
+            # 2. Get current transcript for analysis (already includes user message from append_message)
+            session = await self.shaping_manager.get_session(session_id)
+            transcript = session.get("transcript", []) if session else []
+            
+            # 3. CRITICAL: Check gate state AGAIN after gate engine execution
+            # The gate engine may have just completed all gates with this message
+            # BUT: Only route to planning if user has explicitly confirmed (not just completed)
+            updated_gate_state = await self.shaping_manager._load_gate_state(session_id)
+            
+            # Check if user has explicitly confirmed (look at last transcript message)
+            has_confirmation = False
+            if transcript:
+                last_few_messages = transcript[-3:] if len(transcript) >= 3 else transcript
+                for msg in last_few_messages:
+                    if isinstance(msg, dict):
+                        completion_status = msg.get("completion_status", {})
+                        if completion_status.get("completion_reason") == "user_confirmed":
+                            has_confirmation = True
+                            break
+            
+            if updated_gate_state and updated_gate_state.status.pass_ and has_confirmation:
+                # Gates completed AND user confirmed! Route to planning phase
+                logger.info(f"[WorkflowOrchestrator.handle_chat_message] ✅ Gates completed and confirmed - routing to planning phase")
+                
+                # NOW trigger planner (after user confirms)
+                # Capture gate data and trigger planner update
+                gate_data = await self.shaping_manager._capture_gate_data_for_planner(
+                    session_id=session_id,
+                    gate_state=updated_gate_state,
+                    transcript=transcript,
+                    strategy=session.get("consultant_strategy", "TABULA_RASA") if session else "TABULA_RASA",
+                    rag_data=session.get("rag_citations", []) if session else []
+                )
+                
+                # Trigger planner update in background (now that user confirmed)
+                asyncio.create_task(self._trigger_planner_update(session_id, transcript))
+                
+                from nexus.core.base_agent import BaseAgent
+                agent = BaseAgent(session_id=session_id)
+                
+                # Emit planning phase transition
+                await self._detect_planning_phase_transition(session_id)
+                
+                # Format planning phase start message (per UX spec)
+                transition_message = """🎯 Planning Phase Started
+
+We've gathered all the information we need. Now let's build your workflow plan.
+
+First, would you like to:
+• Build a new workflow from scratch
+• Reuse an existing workflow from your repository
+
+Please let me know which option you prefer."""
+                
+                try:
+                    from nexus.brains.conversational_agent import conversational_agent
+                    formatted_message = await conversational_agent.format_response(
+                        raw_response=transition_message,
+                        user_id=user_id,
+                        context={"operation": "planning_phase_start", "source": "orchestrator", "session_id": session_id}
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Conversational agent formatting failed: {e}")
+                    formatted_message = transition_message
+                
+                # Emit planning phase response
+                await agent.emit("OUTPUT", {"role": "system", "content": formatted_message})
+                
+                # Emit Build/Reuse decision buttons
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Emitting Build/Reuse decision buttons")
+                from nexus.core.action_button_handler import ActionButtonHandler
+                handler = ActionButtonHandler(agent)
+                buttons = [
+                    {
+                        "id": "planning_build_new",
+                        "label": "Build New Workflow",
+                        "variant": "primary",
+                        "action": {
+                            "type": "api_call",
+                            "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                            "method": "POST",
+                            "payload": {
+                                "message": "build_new",
+                                "user_id": user_id
+                            }
+                        }
+                    },
+                    {
+                        "id": "planning_reuse_existing",
+                        "label": "Reuse Existing Workflow",
+                        "variant": "secondary",
+                        "action": {
+                            "type": "api_call",
+                            "endpoint": f"/api/workflows/shaping/{session_id}/chat",
+                            "method": "POST",
+                            "payload": {
+                                "message": "reuse_existing",
+                                "user_id": user_id
+                            }
+                        }
+                    }
+                ]
+                
+                await handler.emit_decision_buttons(
+                    buttons=buttons,
+                    decision_column="planning_phase_decision",
+                    decision_table="shaping_sessions",
+                    message="First, would you like to:",
+                    context="planning_phase_decision"
+                )
+                
+                # Get current transcript - append_message already added the user message
+                # DON'T add user message again - it's already in transcript from append_message
+                session = await self.shaping_manager.get_session(session_id)
+                transcript = session.get("transcript", []) if session else []
+                
+                # Add planning phase system message to transcript
+                transcript.append({"role": "system", "content": formatted_message, "timestamp": "now"})
+                
+                # Persist transcript
+                await database.execute(
+                    "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+                    {"transcript": json.dumps(transcript), "id": session_id}
+                )
+                
+                # Return planning phase response
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] EXIT | Returning planning phase response")
+                return {
+                    "reply": formatted_message,
+                    "trace_id": None
+                }
+            
+            # 4. Check for planning phase transition (gate completion) - fire and forget
+            asyncio.create_task(self._detect_planning_phase_transition(session_id))
+            
+            # 5. Trigger workflow analysis (parallel) - re-analyze existing workflows
             # Fire and forget - don't block on these
             asyncio.create_task(self._trigger_workflow_analysis(session_id, message))
             
-            # 4. Trigger planner update (parallel) - update draft plan
+            # 6. Trigger planner update (parallel) - update draft plan
             asyncio.create_task(self._trigger_planner_update(session_id, transcript))
             
-            # 6. Get updated session to get the reply
+            # 7. Get updated session to get the reply
             updated_session = await self.shaping_manager.get_session(session_id)
             transcript_list = updated_session.get("transcript", []) if updated_session else []
             last_message = transcript_list[-1] if transcript_list else {}
             
-            # 7. Metrics
+            # 8. Metrics
             self._record_metric("chat_message.processed", 1, {"session_id": session_id})
             
-            return {
+            result = {
                 "reply": last_message.get("content", ""),
                 "trace_id": last_message.get("trace_id")
             }
+            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] EXIT | Returning gate flow response")
+            return result
         except Exception as e:
+            logger.error(f"[WorkflowOrchestrator.handle_chat_message] ERROR | Exception: {e}", exc_info=True)
             await self._handle_error(e, {"operation": "handle_chat_message", "session_id": session_id}, session_id)
             raise
     
@@ -748,6 +1261,130 @@ class WorkflowOrchestrator(BaseOrchestrator):
         except Exception as e:
             self.logger.warning(f"Workflow analysis failed for session {session_id}: {e}")
     
+    async def _detect_planning_phase_transition(self, session_id: int) -> None:
+        """
+        Detect if gates are complete and trigger planning phase transition.
+        """
+        logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] ENTRY | session_id={session_id}")
+        try:
+            # Load gate state
+            logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Loading gate state")
+            gate_state = await self.shaping_manager._load_gate_state(session_id)
+            
+            if not gate_state:
+                logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] No gate state found, exiting")
+                return
+            
+            logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Gate state loaded: pass_={gate_state.status.pass_}")
+            
+            # Check if gates are complete
+            if gate_state.status.pass_:
+                logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Gates are complete, checking if planning phase already started")
+                # Check if planning phase already started (handle missing column gracefully)
+                db = self._get_database()
+                decision = None
+                try:
+                    query = "SELECT planning_phase_decision FROM shaping_sessions WHERE id = :session_id"
+                    row = await db.fetch_one(query, {"session_id": session_id})
+                    
+                    if row:
+                        row_dict = dict(row)
+                        decision = row_dict.get("planning_phase_decision")
+                        logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Planning phase decision: {decision}")
+                except Exception as col_error:
+                    # Column doesn't exist yet - migration not run
+                    logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Planning phase columns not found (migration may not be run): {col_error}")
+                    decision = None  # Treat as no decision made yet
+                
+                # If no decision made yet, emit planning phase started event
+                if not decision:
+                    logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] No decision yet, emitting PLANNING_PHASE_STARTED artifact")
+                    from nexus.core.base_agent import BaseAgent
+                    agent = BaseAgent(session_id=session_id)
+                    
+                    await agent.emit("ARTIFACTS", {
+                        "type": "PLANNING_PHASE_STARTED",
+                        "message": "Gates complete. Ready to enter planning phase.",
+                        "session_id": session_id
+                    })
+                    
+                    # Update journey state
+                    logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Updating journey state to PLANNING")
+                    await self._emit_journey_state_update(
+                        session_id=session_id,
+                        current_step="planning_phase_ready",
+                        percent_complete=50.0,
+                        step_details={"gate_status": "complete"},
+                        status="PLANNING"
+                    )
+                    logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Planning phase transition complete")
+                else:
+                    logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Planning phase already started (decision={decision}), skipping")
+            else:
+                logger.debug(f"[WorkflowOrchestrator._detect_planning_phase_transition] Gates not complete yet (pass_={gate_state.status.pass_})")
+        except Exception as e:
+            logger.error(f"[WorkflowOrchestrator._detect_planning_phase_transition] ERROR | Failed to detect planning phase transition: {e}", exc_info=True)
+            self.logger.warning(f"Failed to detect planning phase transition: {e}")
+    
+    async def _format_and_emit_response(
+        self,
+        session_id: int,
+        user_id: str,
+        raw_message: str,
+        buttons: Optional[List[Dict]] = None,
+        button_context: Optional[str] = None,
+        button_metadata: Optional[Dict] = None
+    ) -> None:
+        """
+        Centralized formatting and emission:
+        1. Format raw message through conversational agent
+        2. Emit formatted OUTPUT
+        3. Emit buttons (if any)
+        """
+        from nexus.core.base_agent import BaseAgent
+        from nexus.brains.conversational_agent import conversational_agent
+        from nexus.core.button_builder import emit_action_buttons
+        
+        agent = BaseAgent(session_id=session_id)
+        
+        # Skip formatting/emission if message is empty (e.g., user confirmed, orchestrator will handle)
+        if not raw_message or not raw_message.strip():
+            # Only emit buttons if provided (even with empty message)
+            if buttons:
+                await emit_action_buttons(
+                    agent=agent,
+                    buttons=buttons,
+                    message=None,
+                    context=button_context,
+                    metadata=button_metadata
+                )
+            return
+        
+        # Format through conversational agent
+        try:
+            formatted_message = await conversational_agent.format_response(
+                raw_response=raw_message,
+                user_id=user_id,
+                context={"operation": "gate_response", "source": "gate_engine", "session_id": session_id}
+            )
+        except Exception as e:
+            self.logger.warning(f"Conversational agent formatting failed: {e}")
+            formatted_message = raw_message
+        
+        # Emit formatted OUTPUT
+        if formatted_message and formatted_message.strip():
+            await agent.emit("OUTPUT", {"role": "system", "content": formatted_message})
+        
+        # Emit buttons if provided
+        if buttons:
+            await emit_action_buttons(
+                agent=agent,
+                buttons=buttons,
+                message=None,
+                context=button_context,
+                metadata=button_metadata
+            )
+    
     async def _trigger_planner_update(self, session_id: int, transcript: Optional[List[Dict[str, Any]]] = None) -> None:
         """
         Trigger planner update and emit draft plan.
@@ -811,14 +1448,25 @@ class WorkflowOrchestrator(BaseOrchestrator):
                     if prompt_data and "GATE_ORDER" in prompt_data.get("config", {}):
                         gate_config = GateConfig.from_prompt_config(prompt_data["config"])
                         
-                        # Use gate_state to living document mapping
-                        living_doc = self.planner_brain.map_gate_state_to_living_document(
-                            gate_state=gate_state,
-                            gate_config=gate_config
+                        # CHANGED: No longer use living_document - use draft_plan directly
+                        # Get template and generate draft_plan with gates
+                        from nexus.modules.shaping_manager import shaping_manager
+                        template = await shaping_manager._retrieve_template_for_planner(
+                            strategy=strategy, 
+                            domain="eligibility"
                         )
                         
-                        # Use living document as draft plan
-                        draft_plan = living_doc
+                        draft_plan = await self.planner_brain.update_draft(
+                            transcript=conversation_history,
+                            context={
+                                "gate_state": gate_state,
+                                "gate_config": gate_config,
+                                "session_id": session_id,
+                                "strategy": strategy,
+                                "manuals": rag_citations,
+                                "template": template
+                            }
+                        )
                         
                         # Request emission
                         await self._request_emission(
@@ -839,11 +1487,20 @@ class WorkflowOrchestrator(BaseOrchestrator):
             # Load gate_state if available (even in fallback)
             gate_state = await self.shaping_manager._load_gate_state(session_id)
             
+            # Get gate_config for planner context
+            gate_config = None
+            try:
+                from nexus.modules.shaping_manager import shaping_manager
+                gate_config = await shaping_manager._load_gate_config(strategy, session_id=session_id)
+            except Exception as e:
+                self.logger.warning(f"Could not load gate_config for planner: {e}")
+            
             context = {
                 "manuals": rag_citations, 
                 "session_id": session_id, 
                 "strategy": strategy,
                 "gate_state": gate_state,
+                "gate_config": gate_config,  # Pass gate_config for gate metadata
                 "transcript": conversation_history  # Use filtered conversation history
             }
             draft_plan = await self.planner_brain.update_draft(conversation_history, context)

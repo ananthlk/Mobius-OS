@@ -8,6 +8,7 @@ import SolutionRail from "@/components/workflows/SolutionRail";
 import ShapingChat from "@/components/workflows/ShapingChat";
 import ProgressHeader, { ProgressState } from "@/components/ProgressHeader";
 import { normalizeProgressState, fetchJourneyState } from "@/utils/progressHelpers";
+import ProcessCards from "@/components/workflows/ProcessCards";
 
 interface Step {
     id: string;
@@ -68,6 +69,9 @@ export default function WorkflowBuilder() {
 
     // Progress State
     const [progressState, setProgressState] = useState<ProgressState>({});
+
+    // Planning Phase State (simplified - just for highlighting)
+    const [highlightedSteps, setHighlightedSteps] = useState<any[]>([]);
     
     // Poll for journey state updates when session is active
     useEffect(() => {
@@ -123,8 +127,15 @@ export default function WorkflowBuilder() {
                 
                 const sessionData = await sessionRes.json();
 
-                if (sessionData.draft_plan && Object.keys(sessionData.draft_plan).length > 0) {
-                    setDraftPlan(sessionData.draft_plan);
+                // Check if draft_plan exists and has meaningful content (gates, phases, or steps)
+                if (sessionData.draft_plan) {
+                    const hasGates = sessionData.draft_plan.gates && sessionData.draft_plan.gates.length > 0;
+                    const hasPhases = sessionData.draft_plan.phases && sessionData.draft_plan.phases.length > 0;
+                    const hasSteps = sessionData.draft_plan.steps && sessionData.draft_plan.steps.length > 0;
+                    const hasOtherKeys = Object.keys(sessionData.draft_plan).length > 0;
+                    if (hasGates || hasPhases || hasSteps || hasOtherKeys) {
+                        setDraftPlan(sessionData.draft_plan);
+                    }
                 }
                 
                 // Update journey state if available
@@ -373,8 +384,28 @@ export default function WorkflowBuilder() {
 
 
     const handleSessionUpdate = async (data: any) => {
+        // Check if draft_plan exists and has meaningful content (gates, phases, or steps)
         if (data.draft_plan) {
-            setDraftPlan(data.draft_plan);
+            const hasGates = data.draft_plan.gates && data.draft_plan.gates.length > 0;
+            const hasPhases = data.draft_plan.phases && data.draft_plan.phases.length > 0;
+            const hasSteps = data.draft_plan.steps && data.draft_plan.steps.length > 0;
+            const hasOtherKeys = Object.keys(data.draft_plan).length > 0;
+            if (hasGates || hasPhases || hasSteps || hasOtherKeys) {
+                console.log("[WORKFLOW_BUILDER] Setting draft plan:", { 
+                    hasGates,
+                    hasPhases, 
+                    hasSteps, 
+                    gatesCount: data.draft_plan.gates?.length || 0,
+                    phasesCount: data.draft_plan.phases?.length || 0,
+                    stepsCount: data.draft_plan.steps?.length || 0,
+                    keys: Object.keys(data.draft_plan)
+                });
+                setDraftPlan(data.draft_plan);
+            } else {
+                console.log("[WORKFLOW_BUILDER] Draft plan exists but is empty:", data.draft_plan);
+            }
+        } else {
+            console.log("[WORKFLOW_BUILDER] No draft_plan in session data");
         }
         
         // Try to fetch journey state directly (more efficient)
@@ -391,6 +422,67 @@ export default function WorkflowBuilder() {
         setProgressState(progress);
     };
 
+
+    // Convert draft plan to phases format for ProcessCards
+    // Handles both "gates" (new structure) and "phases" (legacy structure)
+    const getPhasesFromDraft = () => {
+        if (!draftPlan) {
+            console.log("[WORKFLOW_BUILDER] getPhasesFromDraft: No draftPlan");
+            return [];
+        }
+        
+        console.log("[WORKFLOW_BUILDER] getPhasesFromDraft: draftPlan structure:", {
+            hasGates: !!draftPlan.gates,
+            gatesLength: draftPlan.gates?.length || 0,
+            hasPhases: !!draftPlan.phases,
+            phasesLength: draftPlan.phases?.length || 0,
+            hasSteps: !!draftPlan.steps,
+            stepsLength: draftPlan.steps?.length || 0,
+            keys: Object.keys(draftPlan)
+        });
+        
+        // NEW STRUCTURE: Convert gates to phases format
+        // Gates are essentially phases with additional metadata (gate_key, gate_question, gate_value, etc.)
+        const gates = draftPlan.gates || [];
+        if (gates.length > 0) {
+            console.log("[WORKFLOW_BUILDER] Converting gates to phases format:", gates.length);
+            // Convert each gate to a phase structure
+            return gates.map((gate: any) => ({
+                id: gate.id || `gate_${gate.gate_key}`,
+                name: gate.name || gate.gate_question || "Gate",
+                description: gate.description || gate.gate_question || "",
+                steps: gate.steps || [],
+                // Preserve gate-specific metadata for potential future use
+                gate_key: gate.gate_key,
+                gate_question: gate.gate_question,
+                gate_value: gate.gate_value,
+                gate_data: gate.gate_data
+            }));
+        }
+        
+        // LEGACY STRUCTURE: Use phases directly
+        const phases = draftPlan.phases || [];
+        if (phases.length > 0) {
+            console.log("[WORKFLOW_BUILDER] Returning phases:", phases.length);
+            return phases;
+        }
+        
+        // FALLBACK: convert flat steps to phase structure
+        const steps = draftPlan.steps || [];
+        if (steps.length > 0) {
+            console.log("[WORKFLOW_BUILDER] Converting steps to phase structure:", steps.length);
+            return [{
+                id: "phase_1",
+                name: "Workflow Steps",
+                description: "",
+                steps: steps
+            }];
+        }
+        
+        console.log("[WORKFLOW_BUILDER] No gates, phases, or steps found, returning empty array");
+        return [];
+    };
+
     // --- RENDER ---
     return (
         <div className="flex h-screen bg-[#F9FAFB] text-[#1A1A1A] overflow-hidden font-sans selection:bg-blue-100">
@@ -403,58 +495,45 @@ export default function WorkflowBuilder() {
 
 
 
-            {/* VIEW: SELECTION (SHAPING SPLIT VIEW) */}
+            {/* VIEW: SELECTION (2 COLUMN LAYOUT) */}
             {viewMode === "SELECTION" && (
                 <div className="w-full h-full flex flex-col relative z-10 bg-[#F9FAFB]">
                     {/* Progress Header */}
                     <ProgressHeader progress={progressState} />
                     
                     <div className="flex-1 flex p-6 gap-6 min-h-0">
-                    {/* Loading overlay - only show if we're waiting for initial API response */}
-                    {isInitializing && diagnosticResults.length === 0 && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50 rounded-2xl">
-                            <div className="text-center">
-                                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                <p className="text-sm text-gray-600 font-medium">Initializing workflow builder...</p>
-                                <p className="text-xs text-gray-400 mt-1">Analyzing your request</p>
+                        {/* Loading overlay - only show if we're waiting for initial API response */}
+                        {isInitializing && diagnosticResults.length === 0 && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50 rounded-2xl">
+                                <div className="text-center">
+                                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                    <p className="text-sm text-gray-600 font-medium">Initializing workflow builder...</p>
+                                    <p className="text-xs text-gray-400 mt-1">Analyzing your request</p>
+                                </div>
                             </div>
+                        )}
+                        
+                        {/* Left Rail: Process Cards */}
+                        <div className="w-1/3 border-r border-gray-300 bg-white rounded-2xl shadow-md overflow-hidden">
+                            <ProcessCards
+                                phases={getPhasesFromDraft()}
+                                highlightedSteps={highlightedSteps}
+                                onStepClick={(stepId, phaseId) => {
+                                    // Handle step click if needed
+                                }}
+                            />
                         </div>
-                    )}
-                    {/* Left Rail: Dynamic Solutions - 50% width */}
-                    <div className="flex-1 flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden min-w-0">
-                        <SolutionRail
-                            solutions={diagnosticResults}
-                            selectedId={selectedSolutionId}
-                            onSelect={handleSelectSolution}
-                            draftPlan={draftPlan}
-                            sessionId={currentSessionId}
-                            onStepUpdate={handleStepUpdate}
-                            onStepDelete={handleStepDelete}
-                            onStepReorder={handleStepReorder}
-                            onStepCreate={handleStepCreate}
-                        />
-                        {/* Adopt Button at bottom of rail */}
-                        <div className="p-4 border-t-2 border-gray-300 bg-gray-50">
-                            <button
-                                onClick={handleAdopt}
-                                disabled={!selectedSolutionId}
-                                className="w-full bg-[#1A1A1A] text-white py-3 rounded-xl font-semibold hover:bg-black transition-colors shadow-lg shadow-black/5 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                            >
-                                Adopt Selected Workflow
-                            </button>
-                        </div>
-                    </div>
 
-                    {/* Main Area: Shaping Chat - 50% width */}
-                    <div className="flex-1 h-full min-w-0">
-                        {/* Using the original query as seed */}
-                        <ShapingChat
-                            initialQuery={searchQuery || "I have a problem..."}
-                            onUpdate={handleShapingUpdate}
-                            onSessionUpdate={handleSessionUpdate}
-                            sessionId={currentSessionId}
-                        />
-                    </div>
+                        {/* Right Side: Chat Window */}
+                        <div className="flex-1 h-full min-w-0">
+                            <ShapingChat
+                                initialQuery={searchQuery || "I have a problem..."}
+                                onUpdate={handleShapingUpdate}
+                                onSessionUpdate={handleSessionUpdate}
+                                sessionId={currentSessionId}
+                                progressState={progressState}
+                            />
+                        </div>
                     </div>
                 </div>
             )}

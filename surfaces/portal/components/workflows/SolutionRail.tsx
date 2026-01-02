@@ -38,6 +38,7 @@ export default function SolutionRail({
     const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
     const [isLiveBuilderCollapsed, setIsLiveBuilderCollapsed] = useState(false);
     const [isRepositoryCollapsed, setIsRepositoryCollapsed] = useState(false);
+    const [savingTemplate, setSavingTemplate] = useState(false);
 
     // Sync local phases with draftPlan prop
     React.useEffect(() => {
@@ -200,6 +201,78 @@ export default function SolutionRail({
         }
     };
 
+    const handleSaveTemplate = async () => {
+        if (!draftPlan || !sessionId) return;
+        
+        setSavingTemplate(true);
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            
+            // Get gate state from session
+            const sessionResponse = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}`);
+            const session = await sessionResponse.json();
+            
+            // Generate template key from use case
+            const useCase = session?.gate_state?.gates?.["2_use_case"]?.classified || "default";
+            const templateKey = `workflow:eligibility:TABULA_RASA:${useCase.toLowerCase().replace(/\s+/g, "_")}`;
+            
+            // Build template from current plan
+            const template = {
+                template_key: templateKey,
+                name: draftPlan.name || "Custom Eligibility Template",
+                description: draftPlan.goal || "",
+                template_config: {
+                    phases: draftPlan.phases || [],
+                    gate_mapping: extractGateMapping(session?.gate_state)
+                },
+                match_pattern: {
+                    gates: extractGatePattern(session?.gate_state)
+                }
+            };
+            
+            // Save to backend
+            const response = await fetch(`${apiUrl}/api/workflows/templates/eligibility`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(template)
+            });
+            
+            if (response.ok) {
+                alert("Template saved successfully!");
+            } else {
+                const error = await response.json();
+                alert(`Failed to save template: ${error.detail || "Unknown error"}`);
+            }
+        } catch (error: any) {
+            console.error("Failed to save template:", error);
+            alert(`Failed to save template: ${error.message}`);
+        } finally {
+            setSavingTemplate(false);
+        }
+    };
+
+    const extractGateMapping = (gateState: any) => {
+        if (!gateState?.gates) return {};
+        const mapping: Record<string, any> = {};
+        Object.entries(gateState.gates).forEach(([key, value]: [string, any]) => {
+            if (value?.classified) {
+                mapping[key] = value.classified;
+            }
+        });
+        return mapping;
+    };
+
+    const extractGatePattern = (gateState: any) => {
+        if (!gateState?.gates) return {};
+        const pattern: Record<string, any> = {};
+        Object.entries(gateState.gates).forEach(([key, value]: [string, any]) => {
+            if (value?.classified) {
+                pattern[key] = value.classified;
+            }
+        });
+        return { gates: pattern };
+    };
+
     return (
         <div className="w-full bg-white border-r-2 border-gray-300 flex flex-col h-full z-20">
             {/* TOP PANEL: LIVE BUILDER */}
@@ -217,13 +290,25 @@ export default function SolutionRail({
                         </h2>
                                 </Tooltip>
                             </div>
-                            <button
-                                onClick={() => setIsLiveBuilderCollapsed(true)}
-                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                                title="Collapse Live Builder"
-                            >
-                                <ChevronUp size={16} />
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {draftPlan && sessionId && (
+                                    <button
+                                        onClick={handleSaveTemplate}
+                                        disabled={savingTemplate}
+                                        className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50"
+                                        title="Save as Template"
+                                    >
+                                        {savingTemplate ? "Saving..." : "Save Template"}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setIsLiveBuilderCollapsed(true)}
+                                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                                    title="Collapse Live Builder"
+                                >
+                                    <ChevronUp size={16} />
+                                </button>
+                            </div>
                         </div>
                     {draftPlan?.problem_statement && (
                         <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
@@ -546,8 +631,8 @@ export default function SolutionRail({
                             </Tooltip>
                             <Tooltip content="The workflow currently being constructed based on your conversation">
                                 <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider cursor-help">
-                            Live Builder
-                        </h2>
+                        Live Builder
+                    </h2>
                             </Tooltip>
                         </div>
                         <ChevronDown size={16} className="text-gray-400" />

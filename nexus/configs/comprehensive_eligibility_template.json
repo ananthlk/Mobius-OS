@@ -1,0 +1,327 @@
+{
+  "template_key": "workflow:eligibility:TABULA_RASA:template",
+  "name": "Eligibility Verification Workflow Template - Comprehensive",
+  "description": "Comprehensive template for eligibility verification workflows with detailed steps for all phases",
+  "template_config": {
+    "name": "Eligibility Verification Workflow",
+    "goal": "Verify patient eligibility and determine coverage status through comprehensive data gathering and analysis",
+    "phases": [
+      {
+        "id": "phase_a",
+        "name": "Retrieve Basic Information",
+        "description": "Gather patient demographics, identifiers, and insurance information from multiple sources",
+        "steps": [
+          {
+            "id": "step_a1",
+            "description": "Collect patient name (first, middle, last)",
+            "tool_hint": "collect_patient_name",
+            "timeline_estimate": "immediately",
+            "requires_human_action": true,
+            "human_action_description": "User provides patient name"
+          },
+          {
+            "id": "step_a2",
+            "description": "Collect patient date of birth",
+            "tool_hint": "collect_patient_dob",
+            "timeline_estimate": "immediately",
+            "requires_human_action": true,
+            "human_action_description": "User provides patient date of birth"
+          },
+          {
+            "id": "step_a3",
+            "description": "Collect Medical Record Number (MRN) if available",
+            "tool_hint": "collect_mrn",
+            "timeline_estimate": "immediately",
+            "requires_human_action": true,
+            "human_action_description": "User provides MRN or indicates if unavailable"
+          },
+          {
+            "id": "step_a4",
+            "description": "Collect insurance information (payer name, policy number, group number)",
+            "tool_hint": "collect_insurance_info",
+            "timeline_estimate": "immediately",
+            "requires_human_action": true,
+            "human_action_description": "User provides insurance details"
+          },
+          {
+            "id": "step_a5",
+            "description": "Check EMR system for existing patient record",
+            "tool_hint": "check_emr_patient_record",
+            "timeline_estimate": "after step_a3",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_a6",
+            "description": "Retrieve patient demographics from EMR (name, DOB, address, phone)",
+            "tool_hint": "retrieve_emr_demographics",
+            "timeline_estimate": "after step_a5",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_a7",
+            "description": "Check patient master index (PMI) for additional identifiers",
+            "tool_hint": "check_patient_master_index",
+            "timeline_estimate": "after step_a6",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_a8",
+            "description": "Retrieve insurance information from EMR insurance table",
+            "tool_hint": "retrieve_emr_insurance",
+            "timeline_estimate": "after step_a4",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_a9",
+            "description": "Check external patient registries and health information exchanges (HIE)",
+            "tool_hint": "check_hie_registries",
+            "timeline_estimate": "after step_a7",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_a10",
+            "description": "Validate and reconcile patient information from all sources",
+            "tool_hint": "validate_patient_info",
+            "timeline_estimate": "after step_a9",
+            "requires_human_review": true,
+            "human_action_description": "Review and confirm patient information accuracy"
+          }
+        ]
+      },
+      {
+        "id": "phase_b",
+        "name": "Assess Eligibility Risk & Use-Case Specific Checks",
+        "description": "Compute eligibility risk score and perform use-case specific verification tasks",
+        "steps": [
+          {
+            "id": "step_b1",
+            "description": "Compute member eligibility risk score based on available data quality and completeness",
+            "tool_hint": "compute_eligibility_risk_score",
+            "timeline_estimate": "after phase_a",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_b2_insurance_billing",
+            "description": "If use case is Insurance Billing - Retrieve claim details for past event",
+            "tool_hint": "retrieve_claim_details",
+            "timeline_estimate": "after step_b1",
+            "requires_human_review": false,
+            "condition": "use_case == 'Billing'"
+          },
+          {
+            "id": "step_b3_insurance_billing",
+            "description": "If use case is Insurance Billing - Verify service dates match eligibility period",
+            "tool_hint": "verify_service_date_eligibility",
+            "timeline_estimate": "after step_b2_insurance_billing",
+            "requires_human_review": false,
+            "condition": "use_case == 'Billing'"
+          },
+          {
+            "id": "step_b4_insurance_billing",
+            "description": "If use case is Insurance Billing - Check for prior authorization requirements",
+            "tool_hint": "check_prior_authorization",
+            "timeline_estimate": "after step_b3_insurance_billing",
+            "requires_human_review": true,
+            "condition": "use_case == 'Billing'"
+          },
+          {
+            "id": "step_b2_clinical",
+            "description": "If use case is Clinical - Determine eligible dates for scheduling",
+            "tool_hint": "check_eligible_dates",
+            "timeline_estimate": "after step_b1",
+            "requires_human_review": false,
+            "condition": "use_case == 'Clinical'"
+          },
+          {
+            "id": "step_b3_clinical",
+            "description": "If use case is Clinical - Check visit authorization limits and frequency",
+            "tool_hint": "check_visit_authorization",
+            "timeline_estimate": "after step_b2_clinical",
+            "requires_human_review": false,
+            "condition": "use_case == 'Clinical'"
+          },
+          {
+            "id": "step_b4_clinical",
+            "description": "If use case is Clinical - Verify coverage for specific procedure codes",
+            "tool_hint": "verify_procedure_coverage",
+            "timeline_estimate": "after step_b3_clinical",
+            "requires_human_review": true,
+            "condition": "use_case == 'Clinical'"
+          },
+          {
+            "id": "step_b2_financial",
+            "description": "If use case is Financial - Calculate copay estimation",
+            "tool_hint": "calculate_copay_estimate",
+            "timeline_estimate": "after step_b1",
+            "requires_human_review": false,
+            "condition": "use_case == 'Financial'"
+          },
+          {
+            "id": "step_b3_financial",
+            "description": "If use case is Financial - Check deductible status and remaining balance",
+            "tool_hint": "check_deductible_status",
+            "timeline_estimate": "after step_b2_financial",
+            "requires_human_review": false,
+            "condition": "use_case == 'Financial'"
+          },
+          {
+            "id": "step_b4_financial",
+            "description": "If use case is Financial - Calculate out-of-pocket maximum status",
+            "tool_hint": "calculate_oop_max_status",
+            "timeline_estimate": "after step_b3_financial",
+            "requires_human_review": true,
+            "condition": "use_case == 'Financial'"
+          },
+          {
+            "id": "step_b2_other",
+            "description": "If use case is Other - Perform general eligibility verification",
+            "tool_hint": "general_eligibility_check",
+            "timeline_estimate": "after step_b1",
+            "requires_human_review": false,
+            "condition": "use_case == 'Other'"
+          }
+        ]
+      },
+      {
+        "id": "phase_c",
+        "name": "Check Eligibility",
+        "description": "Verify eligibility status through direct insurance transactions and alternative sources",
+        "steps": [
+          {
+            "id": "step_c1",
+            "description": "Check eligibility via direct insurance transaction (270/271 EDI or payer API)",
+            "tool_hint": "check_eligibility_direct",
+            "timeline_estimate": "after phase_b",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c2",
+            "description": "Parse eligibility response and extract coverage details",
+            "tool_hint": "parse_eligibility_response",
+            "timeline_estimate": "after step_c1",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c3",
+            "description": "Check eligibility via HIE and historical context if direct unavailable",
+            "tool_hint": "check_eligibility_imputed",
+            "timeline_estimate": "after step_c1 if direct unavailable",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c4",
+            "description": "Check historical eligibility records from past transactions",
+            "tool_hint": "check_historical_eligibility",
+            "timeline_estimate": "after step_c3",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c5",
+            "description": "Validate eligibility effective dates and coverage periods",
+            "tool_hint": "validate_eligibility_dates",
+            "timeline_estimate": "after step_c2",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c6",
+            "description": "Extract benefit details (deductibles, copays, coinsurance, limits)",
+            "tool_hint": "extract_benefit_details",
+            "timeline_estimate": "after step_c5",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c7",
+            "description": "Check for secondary/tertiary insurance coverage",
+            "tool_hint": "check_secondary_insurance",
+            "timeline_estimate": "after step_c6",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_c8",
+            "description": "Compile comprehensive eligibility report",
+            "tool_hint": "compile_eligibility_report",
+            "timeline_estimate": "after step_c7",
+            "requires_human_review": true,
+            "human_action_description": "Review eligibility report for accuracy"
+          }
+        ]
+      },
+      {
+        "id": "phase_d",
+        "name": "Next Steps & Stakeholder Notification",
+        "description": "Handle outcomes based on eligibility status and notify relevant stakeholders",
+        "steps": [
+          {
+            "id": "step_d_eligible",
+            "description": "If eligible: Confirm coverage status and prepare confirmation document",
+            "tool_hint": "handle_eligible_outcome",
+            "timeline_estimate": "after phase_c",
+            "requires_human_review": true,
+            "human_action_description": "Review and approve eligible outcome"
+          },
+          {
+            "id": "step_d_eligible_notify",
+            "description": "If eligible: Notify clinical staff and billing department of confirmed coverage",
+            "tool_hint": "notify_stakeholders_eligible",
+            "timeline_estimate": "after step_d_eligible",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_d_not_eligible",
+            "description": "If not eligible: Execute handling action based on gate selection (Manual Review/Escalate/Notify Provider/Block Service/Allow with Warning)",
+            "tool_hint": "handle_not_eligible_outcome",
+            "timeline_estimate": "after phase_c",
+            "requires_human_review": true,
+            "human_action_description": "Review ineligibility and confirm handling action"
+          },
+          {
+            "id": "step_d_not_eligible_notify",
+            "description": "If not eligible: Notify provider and patient of ineligibility status",
+            "tool_hint": "notify_ineligibility",
+            "timeline_estimate": "after step_d_not_eligible",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_d_not_eligible_alternatives",
+            "description": "If not eligible: Explore state program alternatives for coverage",
+            "tool_hint": "explore_state_alternatives",
+            "timeline_estimate": "after step_d_not_eligible_notify",
+            "requires_human_review": true,
+            "condition": "ineligibility_handling == 'Manual Review' or ineligibility_handling == 'Other'"
+          },
+          {
+            "id": "step_d_unable",
+            "description": "If unable to determine: Escalate to eligibility specialist for manual review",
+            "tool_hint": "handle_unable_to_determine",
+            "timeline_estimate": "after phase_c",
+            "requires_human_review": true,
+            "human_action_description": "Manual review required - escalate to specialist"
+          },
+          {
+            "id": "step_d_unable_notify",
+            "description": "If unable to determine: Notify provider and patient of pending review",
+            "tool_hint": "notify_pending_review",
+            "timeline_estimate": "after step_d_unable",
+            "requires_human_review": false
+          },
+          {
+            "id": "step_d_finalize",
+            "description": "Finalize eligibility determination and update patient record",
+            "tool_hint": "finalize_eligibility_determination",
+            "timeline_estimate": "after all outcome steps",
+            "requires_human_review": true,
+            "human_action_description": "Final review and approval of eligibility determination"
+          }
+        ]
+      }
+    ]
+  },
+  "match_pattern": {
+    "gates": {
+      "1_patient_info_availability": null,
+      "2_use_case": null,
+      "3_ineligibility_handling": null,
+      "4_urgency_timeline": null
+    }
+  }
+}

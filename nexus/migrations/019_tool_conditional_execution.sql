@@ -48,3 +48,4 @@ COMMENT ON TABLE tool_execution_conditions IS 'Stores conditional execution rule
 COMMENT ON COLUMN tool_execution_conditions.condition_expression IS 'JSONB structure: {"field": "field_name", "operator": "equals|not_equals|contains|greater_than|less_than", "value": "expected_value"}';
 COMMENT ON COLUMN tool_execution_conditions.icon_name IS 'Icon identifier for UI display (e.g., if-check, on-success, on-failure)';
 
+

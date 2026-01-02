@@ -115,3 +115,4 @@ class CopayDeductibleCalculator(NexusTool):
             "remaining_deductible": 400.00
         }
 
+

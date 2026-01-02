@@ -18,3 +18,4 @@ COMMENT ON COLUMN user_communication_preferences.tone IS 'Preferred communicatio
 COMMENT ON COLUMN user_communication_preferences.style IS 'Preferred communication style: brief, detailed, or balanced';
 COMMENT ON COLUMN user_communication_preferences.engagement_level IS 'Preferred engagement level: engaging, formal, or neutral';
 
+
