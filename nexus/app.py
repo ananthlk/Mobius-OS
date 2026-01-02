@@ -42,6 +42,26 @@ async def lifespan(app: FastAPI):
         logger = logging.getLogger("nexus.app")
         logger.warning(f"Tool library seeding failed (non-fatal): {e}")
     
+    # Seed planner prompt if it doesn't exist
+    try:
+        from nexus.modules.prompt_manager import prompt_manager
+        from nexus.scripts.seed_planner_prompt import seed_planner_prompt
+        # Check if planner prompt exists
+        planner_prompt = await prompt_manager.get_prompt(
+            module_name="workflow",
+            domain="eligibility",
+            mode="TABULA_RASA",
+            step="planner"
+        )
+        if not planner_prompt:
+            # Import the async function directly (seed_planner_prompt connects/disconnects internally)
+            await seed_planner_prompt()
+    except Exception as e:
+        # Log but don't fail startup if seeding fails
+        import logging
+        logger = logging.getLogger("nexus.app")
+        logger.warning(f"Planner prompt seeding failed (non-fatal): {e}")
+    
     yield
     # Shutdown
     await disconnect_from_db()

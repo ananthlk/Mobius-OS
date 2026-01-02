@@ -233,7 +233,12 @@ class GateEngine:
         parts.append("\n\nYour Task:")
         parts.append("1. Extract gate values from the user input")
         parts.append("2. Update the 'gates' object with raw (verbatim) and classified (categorized) values")
-        parts.append("3. Update the 'summary' if the user provides new context")
+        parts.append("3. SYNTHESIZE a comprehensive summary that integrates ALL gate values into a cohesive problem statement:")
+        parts.append("   - Include patient info availability status (what data is available)")
+        parts.append("   - Include use case/purpose (why this check is needed)")
+        parts.append("   - Include ineligibility handling (what happens if check fails)")
+        parts.append("   - Include urgency/timeline (how soon this is needed)")
+        parts.append("   - Example: 'User has urgent need (Within 48 Hours) to determine eligibility for clinical programming. Has insurance info. If ineligible, must find state alternatives.'")
         parts.append("4. Set 'status.next_gate' to recommend the next gate to ask (or null if done)")
         parts.append("5. Set 'status.next_query' to the exact question to ask next")
         parts.append("6. Set 'status.pass' to true only if ALL required gates have classified values")
@@ -264,6 +269,17 @@ class GateEngine:
         
         parts.append(json.dumps(template, indent=2))
         parts.append("\n\nIMPORTANT: Use the exact gate keys listed above. Do not invent new keys.")
+        
+        # Summary synthesis requirement (CRITICAL)
+        parts.append("\n\nCRITICAL: Summary Synthesis Requirement:")
+        parts.append("The 'summary' field must be a COMPREHENSIVE SYNTHESIS of all gate values, not just a list.")
+        parts.append("It should read as a cohesive problem statement that integrates:")
+        parts.append("  - Patient information availability (from gate 1)")
+        parts.append("  - Use case/purpose (from gate 2)")
+        parts.append("  - Ineligibility handling/fallback (from gate 3)")
+        parts.append("  - Urgency/timeline (from gate 4)")
+        parts.append("Example: 'User has urgent need (Within 48 Hours) to determine Medicaid eligibility for clinical programming.")
+        parts.append("Has patient demographics and insurance information. If ineligible, must explore state program alternatives.'")
         
         # Mandatory logic
         if gate_config.mandatory_logic:

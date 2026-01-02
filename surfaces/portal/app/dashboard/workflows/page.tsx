@@ -420,8 +420,8 @@ export default function WorkflowBuilder() {
                             </div>
                         </div>
                     )}
-                    {/* Left Rail: Dynamic Solutions */}
-                    <div className="w-[420px] flex-shrink-0 flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden">
+                    {/* Left Rail: Dynamic Solutions - 50% width */}
+                    <div className="flex-1 flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden min-w-0">
                         <SolutionRail
                             solutions={diagnosticResults}
                             selectedId={selectedSolutionId}
@@ -445,8 +445,8 @@ export default function WorkflowBuilder() {
                         </div>
                     </div>
 
-                    {/* Main Area: Shaping Chat */}
-                    <div className="flex-1 h-full min-w-0 max-w-3xl">
+                    {/* Main Area: Shaping Chat - 50% width */}
+                    <div className="flex-1 h-full min-w-0">
                         {/* Using the original query as seed */}
                         <ShapingChat
                             initialQuery={searchQuery || "I have a problem..."}

@@ -11,6 +11,8 @@ from nexus.core.base_tool import NexusTool
 
 from nexus.modules.config_manager import config_manager
 from nexus.core.prompt_builder import PromptBuilder
+from nexus.modules.prompt_manager import prompt_manager
+from nexus.brains.planner_parser import PlannerPlanParser
 
 
 class PlannerBrain:
@@ -132,6 +134,49 @@ class PlannerBrain:
         
         # Default to real-time if unclear
         return False
+    
+    async def _process_step(self, step: Dict[str, Any], available_tools: List[NexusTool]) -> None:
+        """Process a single step for tool matching and indicators."""
+        if not isinstance(step, dict):
+            return
+        
+        tool_hint = step.get("tool_hint", "")
+        
+        # Check if human intervention
+        if tool_hint.lower() in ["human_intervention", "manual_review", "human_review", "manual_task"]:
+            step["tool_matched"] = False
+            step["tool_name"] = None
+            step["requires_human_review"] = True
+            self.mem.debug(f"[PLANNER] Step {step.get('id')} marked as human intervention")
+            return
+        
+        # Regular tool matching
+        tool_match_result = await self._match_tool(tool_hint, available_tools)
+        step["tool_matched"] = tool_match_result["tool_matched"]
+        
+        if tool_match_result["tool_matched"]:
+            step["tool_name"] = tool_match_result["tool_name"]
+            
+            # Get execution conditions from tool library
+            try:
+                from nexus.tools.library.registry import tool_registry
+                tool_data = await tool_registry.get_tool_by_name(tool_match_result["tool_name"])
+                if tool_data and tool_data.get("execution_conditions"):
+                    step["execution_conditions"] = tool_data["execution_conditions"]
+            except Exception as e:
+                self.mem.debug(f"Could not load execution conditions for {tool_match_result['tool_name']}: {e}")
+        else:
+            step["tool_name"] = None
+            # If tool not matched and not explicitly human_intervention, mark for human review
+            if not step.get("requires_human_review"):
+                step["requires_human_review"] = True
+                self.mem.debug(f"[PLANNER] Step {step.get('id')} has no matching tool, marked for human review")
+        
+        # Human review and batch detection
+        description = step.get("description", "")
+        if not step.get("requires_human_review"):
+            step["requires_human_review"] = self._detect_human_review(description, step.get("tool_name"))
+        step["is_batch"] = self._detect_batch(description, step.get("tool_name"))
 
     async def update_draft(self, transcript: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -140,13 +185,19 @@ class PlannerBrain:
         """
         self.mem.log_thinking(f"[PLANNER] update_draft | Transcript Size: {len(transcript)} msgs")
         
-        # Extract gate_state from context
+        # Extract gate_state from context - this is continuously updated as conversation progresses
         gate_state = context.get("gate_state")
         problem_statement = ""
         if gate_state and hasattr(gate_state, 'summary'):
-            problem_statement = gate_state.summary
+            problem_statement = gate_state.summary or ""
         elif isinstance(gate_state, dict):
-            problem_statement = gate_state.get("summary", "")
+            problem_statement = gate_state.get("summary", "") or ""
+        
+        # Log the problem statement for debugging
+        if problem_statement:
+            self.mem.log_thinking(f"[PLANNER] Using problem_statement from gate_state: {problem_statement[:150]}...")
+        else:
+            self.mem.log_thinking("[PLANNER] No problem_statement found in gate_state")
         
         # 0. Resolve Model (Governance)
         # We assume the 'system' user for background planning, or ideally pass the real user_id.
@@ -157,42 +208,136 @@ class PlannerBrain:
         available_tools = await self._get_available_tools()
         tools_list = [t.define_schema().name for t in available_tools]
 
-        # 1. System Prompt (PromptBuilder)
-        pb = PromptBuilder()
-        pb.set_role("You are the Planner Module of Mobius OS. Your job is to listen to the conversation and output a structured DRAFT PLAN.")
+        # Get session_id from context for prompt_manager
+        session_id = context.get("session_id")
         
-        # Add problem statement context if available
-        if problem_statement:
-            pb.add_context("PROBLEM_STATEMENT", problem_statement)
-            pb.set_task(f"Based on the problem statement and what has been agreed upon, output a JSON plan. Each step must directly contribute to solving the problem: {problem_statement}")
+        # Detect domain and mode from context
+        domain = context.get("domain", "eligibility")  # Default to eligibility
+        mode = context.get("strategy", "TABULA_RASA")  # Default to TABULA_RASA
+        
+        # 1. Get prompt from database
+        prompt_data = await prompt_manager.get_prompt(
+            module_name="workflow",
+            domain=domain,
+            mode=mode,
+            step="planner",
+            session_id=session_id
+        )
+        
+        if not prompt_data:
+            # Fallback to PromptBuilder if prompt not found in database
+            self.mem.log_thinking("[PLANNER] Prompt not found in database, using fallback PromptBuilder")
+            pb = PromptBuilder()
+            pb.set_role("You are the Planner Module of Mobius OS. Your job is to listen to the conversation and output a structured DRAFT PLAN with user-friendly step descriptions.")
+            
+            if problem_statement:
+                pb.add_context("PROBLEM_STATEMENT", problem_statement)
+                pb.set_task(f"Based on the problem statement and what has been agreed upon, output a JSON plan. Each step must directly contribute to solving the problem: {problem_statement}. Write step descriptions in plain, user-friendly language that clearly shows how each step helps achieve the goal.")
+            else:
+                pb.set_task("Based on what has been agreed upon, output a JSON plan. Write step descriptions in plain, user-friendly language.")
+            
+            pb.add_context("MANUALS", json.dumps(context.get("manuals", [])))
+            if tools_list:
+                pb.add_context("AVAILABLE_TOOLS", json.dumps(tools_list))
+            
+            pb.set_output_format("""
+            {
+                "problem_statement": "<gate_state.summary or empty string>",
+                "name": "Suggested Workflow Name",
+                "goal": "Brief goal description",
+                "steps": [
+                    { 
+                        "id": "step_1", 
+                        "tool_hint": "e.g. database_lookup", 
+                        "description": "User-friendly one-line description that clearly shows how this step helps achieve the goal. Write in plain language, avoid technical jargon. Example: 'Verify the patient has active insurance coverage' instead of 'Check member status'",
+                        "solves": "How this step addresses the problem statement"
+                    }
+                ],
+                "missing_info": ["e.g. Payer ID"]
+            }
+            """)
+            pb.add_constraint("Attributes `tool_hint` must be snake_case.")
+            pb.add_constraint("Each step's `description` must be a user-friendly, one-line description (max 80 characters) written in plain language that clearly shows how it helps achieve the goal. Avoid technical jargon, database terms, API names, or implementation details. Write from the user's perspective - what they will see accomplished. Examples: 'Verify patient insurance coverage' (not 'Query member_status table'), 'Calculate patient copay amount' (not 'Run billing_eligibility_verifier tool'), 'Send notification to patient' (not 'Invoke notification API').")
+            pb.add_constraint("Each step must have a `solves` field explaining how it addresses the problem statement.")
+            pb.add_constraint("Output ONLY valid JSON.")
+            
+            system_prompt = pb.build()
+            generation_config = {}
+            prompt_key = f"workflow:{domain}:{mode}:planner"
         else:
-            pb.set_task("Based on what has been agreed upon, output a JSON plan.")
+            # Use prompt from database
+            self.mem.log_thinking(f"[PLANNER] Using prompt from database | Key: {prompt_data.get('key')} | Version: {prompt_data.get('version')}")
+            config = prompt_data["config"]
+            generation_config = prompt_data.get("generation_config", {})
+            prompt_key = prompt_data.get("key", f"workflow:{domain}:{mode}:planner")
+            
+            # Build system prompt using PromptBuilder
+            pb = PromptBuilder()
+            
+            # Set role
+            if "ROLE" in config:
+                pb.set_role(config["ROLE"])
+            
+            # Add context with template variable replacement
+            if "CONTEXT" in config:
+                context_config = config["CONTEXT"]
+                if isinstance(context_config, dict):
+                    # Replace template variables
+                    if "PROBLEM_STATEMENT" in context_config:
+                        context_str = context_config["PROBLEM_STATEMENT"]
+                        if context_str == "{{PROBLEM_STATEMENT}}":
+                            if problem_statement:
+                                pb.add_context("PROBLEM_STATEMENT", problem_statement)
+                        else:
+                            pb.add_context("PROBLEM_STATEMENT", context_str)
+                    
+                    if "MANUALS" in context_config:
+                        context_str = context_config["MANUALS"]
+                        if context_str == "{{MANUALS}}":
+                            pb.add_context("MANUALS", json.dumps(context.get("manuals", [])))
+                        else:
+                            pb.add_context("MANUALS", context_str)
+                    
+                    if "AVAILABLE_TOOLS" in context_config:
+                        context_str = context_config["AVAILABLE_TOOLS"]
+                        if context_str == "{{AVAILABLE_TOOLS}}":
+                            if tools_list:
+                                pb.add_context("AVAILABLE_TOOLS", json.dumps(tools_list))
+                        else:
+                            pb.add_context("AVAILABLE_TOOLS", context_str)
+                else:
+                    pb.add_context("CONTEXT", context_config)
+            
+            # Set task/analysis
+            if "ANALYSIS" in config:
+                analysis = config["ANALYSIS"]
+                # Replace problem statement in analysis if needed
+                if problem_statement and "{{PROBLEM_STATEMENT}}" in analysis:
+                    analysis = analysis.replace("{{PROBLEM_STATEMENT}}", problem_statement)
+                pb.set_task(analysis)
+            
+            # Add constraints
+            if "CONSTRAINTS" in config:
+                for constraint in config["CONSTRAINTS"]:
+                    pb.add_constraint(constraint)
+            
+            # Set output format
+            if "OUTPUT" in config:
+                output_config = config["OUTPUT"]
+                if isinstance(output_config, dict):
+                    if "format" in output_config:
+                        pb.set_output_format(output_config["format"])
+                    elif "schema" in output_config:
+                        schema = output_config["schema"]
+                        format_str = schema.get("description", "")
+                        if "example" in schema:
+                            format_str += "\n\nExample JSON structure:\n" + json.dumps(schema["example"], indent=2)
+                        pb.set_output_format(format_str)
+                else:
+                    pb.set_output_format(output_config)
+            
+            system_prompt = pb.build()
         
-        pb.add_context("MANUALS", json.dumps(context.get("manuals", [])))
-        if tools_list:
-            pb.add_context("AVAILABLE_TOOLS", json.dumps(tools_list))
-        
-        pb.set_output_format("""
-        {
-            "problem_statement": "<gate_state.summary or empty string>",
-            "name": "Suggested Workflow Name",
-            "goal": "Brief goal description",
-            "steps": [
-                { 
-                    "id": "step_1", 
-                    "tool_hint": "e.g. database_lookup", 
-                    "description": "Check member status",
-                    "solves": "How this step addresses the problem statement"
-                }
-            ],
-            "missing_info": ["e.g. Payer ID"]
-        }
-        """)
-        pb.add_constraint("Attributes `tool_hint` must be snake_case.")
-        pb.add_constraint("Each step must have a `solves` field explaining how it addresses the problem statement.")
-        pb.add_constraint("Output ONLY valid JSON.")
-        
-        system_prompt = pb.build()
         user_prompt = f"TRANSCRIPT SO FAR:\n{json.dumps(transcript)}"
         
         self.mem.log_thinking(f"LLM CALL [Planner]: Model={model_context.get('model_id')}")
@@ -209,10 +354,10 @@ class PlannerBrain:
             # Try to get session_id from context if available
             session_id = context.get("session_id")
             
-            # Generate prompt_key for planner (since it uses PromptBuilder, not prompt_manager)
-            # Extract strategy from context if available, otherwise use default
-            strategy = context.get("strategy", "TABULA_RASA")
-            prompt_key = f"workflow:PLANNER:{strategy}"
+            # Use generation_config from prompt if available
+            if generation_config:
+                # Merge generation_config into model_context
+                model_context = {**model_context, **generation_config}
             
             if session_id:
                 # Emit enriched thinking before LLM call
@@ -248,44 +393,36 @@ class PlannerBrain:
                 )
             self.mem.debug(f"   ⚡️ LLM Response: {response[:150]}...")
             
-            # 3. Parse JSON
-            clean_json = response.replace("```json", "").replace("```", "").strip()
-            draft_plan = json.loads(clean_json)
+            # 3. Parse JSON using specialized parser
+            try:
+                parser = PlannerPlanParser()
+                parsed_plan = parser.parse(response)
+                
+                # Convert to dict format
+                draft_plan = parser.to_dict(parsed_plan)
+                
+                self.mem.log_thinking(f"[PLANNER] Parsed plan: {len(parsed_plan.phases)} phases with {sum(len(p.get('steps', [])) for p in parsed_plan.phases)} total steps")
+                
+            except Exception as e:
+                self.mem.error(f"Planner parser failed: {e}")
+                raise  # Fail fast - no backward compatibility
             
-            # 4. Ensure problem_statement is set from gate_state
-            if problem_statement and not draft_plan.get("problem_statement"):
+            # 4. ALWAYS update problem_statement from latest gate_state.summary
+            # This ensures the problem statement stays in sync with the conversation
+            if problem_statement:
                 draft_plan["problem_statement"] = problem_statement
+                self.mem.log_thinking(f"[PLANNER] Updated problem_statement from gate_state: {problem_statement[:100]}...")
+            elif not draft_plan.get("problem_statement"):
+                draft_plan["problem_statement"] = ""
             
-            # 5. Post-process steps: tool matching and indicator detection
-            if "steps" in draft_plan and isinstance(draft_plan["steps"], list):
-                for step in draft_plan["steps"]:
-                    if not isinstance(step, dict):
-                        continue
-                    
-                    # Tool matching
-                    tool_hint = step.get("tool_hint", "")
-                    tool_match_result = await self._match_tool(tool_hint, available_tools)
-                    step["tool_matched"] = tool_match_result["tool_matched"]
-                    if tool_match_result["tool_matched"]:
-                        step["tool_name"] = tool_match_result["tool_name"]
-                        
-                        # Get execution conditions from tool library if tool is matched
-                        try:
-                            from nexus.tools.library.registry import tool_registry
-                            tool_data = await tool_registry.get_tool_by_name(tool_match_result["tool_name"])
-                            if tool_data and tool_data.get("execution_conditions"):
-                                step["execution_conditions"] = tool_data["execution_conditions"]
-                        except Exception as e:
-                            self.mem.debug(f"Could not load execution conditions for {tool_match_result['tool_name']}: {e}")
-                    else:
-                        step["tool_name"] = None
-                    
-                    # Human review detection
-                    description = step.get("description", "")
-                    step["requires_human_review"] = self._detect_human_review(description, step.get("tool_name"))
-                    
-                    # Batch vs real-time detection
-                    step["is_batch"] = self._detect_batch(description, step.get("tool_name"))
+            # 5. Post-process phases and steps: tool matching and indicator detection
+            if "phases" in draft_plan:
+                for phase in draft_plan["phases"]:
+                    if "steps" in phase and isinstance(phase["steps"], list):
+                        for step in phase["steps"]:
+                            await self._process_step(step, available_tools)
+            else:
+                raise ValueError("Plan must have 'phases' structure")
             
             # Emit journey state update after draft is created
             if session_id:

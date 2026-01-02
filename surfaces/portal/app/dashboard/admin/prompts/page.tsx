@@ -14,6 +14,8 @@ interface Prompt {
     domain: string | null;
     mode: string | null;
     step: string | null;
+    strategy: string | null;
+    sub_level: string | null;
     version: number;
     description: string | null;
     created_at: string;
@@ -103,9 +105,9 @@ export default function PromptsPage() {
 
     // Get unique values for filters
     const modules = Array.from(new Set(prompts.map(p => p.module_name))).sort();
-    const domains = Array.from(new Set(prompts.map(p => p.domain).filter(Boolean))).sort();
-    const modes = Array.from(new Set(prompts.map(p => p.mode).filter(Boolean))).sort();
-    const steps = Array.from(new Set(prompts.map(p => p.step).filter(Boolean))).sort();
+    const domains = Array.from(new Set(prompts.map(p => p.domain).filter((d): d is string => d !== null && d !== undefined))).sort();
+    const modes = Array.from(new Set(prompts.map(p => p.mode).filter((m): m is string => m !== null && m !== undefined))).sort();
+    const steps = Array.from(new Set(prompts.map(p => p.step).filter((s): s is string => s !== null && s !== undefined))).sort();
 
     // Filter prompts by search term
     const filteredPrompts = prompts.filter(p => {

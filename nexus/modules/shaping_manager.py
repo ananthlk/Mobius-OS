@@ -357,7 +357,14 @@ class ShapingManager:
         # --- 4. INITIAL PLANNER TRIGGER ---
         # We spawn this in background so the UI loads the chat immediately
         # The 'ARTIFACTS' event will push the plan to the sidebar when ready
-        asyncio.create_task(self._run_initial_plan(session_id, transcript, strategy_result['context'].get('manuals', [])))
+        # Use the gate_state from the initial gate execution
+        asyncio.create_task(self._trigger_planner_after_gate(
+            session_id=session_id,
+            gate_state=gate_result.proposed_state,
+            transcript=transcript,
+            strategy=strategy_result["strategy"],
+            rag_data=strategy_result['context'].get('manuals', [])
+        ))
 
         return session_id
 
@@ -393,6 +400,60 @@ class ShapingManager:
             
         except Exception as e:
             logging.error(f"Initial Planner Failed: {e}")
+
+    async def _trigger_planner_after_gate(
+        self,
+        session_id: int,
+        gate_state: GateState,
+        transcript: List[Dict[str, Any]],
+        strategy: str,
+        rag_data: List[Any]
+    ):
+        """
+        Helper: Triggers planner in parallel after gate execution.
+        This ensures the draft plan stays in sync with the latest gate_state.summary.
+        Runs in background (non-blocking).
+        """
+        agent = BaseAgent(session_id=session_id)
+        try:
+            # Get filtered conversation history for planner (only user-facing messages)
+            from nexus.conductors.workflows.orchestrator import orchestrator
+            conversation_history = await orchestrator.build_conversational_history(session_id)
+            planner_transcript = conversation_history if conversation_history else transcript
+            
+            # Build context with latest gate_state
+            context = {
+                "manuals": rag_data,
+                "gate_state": gate_state,
+                "session_id": session_id,
+                "strategy": strategy,
+                "transcript": planner_transcript
+            }
+            
+            # Update draft plan with latest gate_state.summary
+            new_draft = await planner_brain.update_draft(planner_transcript, context)
+            
+            # Emit Update
+            # Calculate total steps from phases structure
+            total_steps = sum(len(phase.get('steps', [])) for phase in new_draft.get('phases', []))
+            num_phases = len(new_draft.get('phases', []))
+            await agent.emit("ARTIFACTS", {
+                "type": "DRAFT_PLAN", 
+                "data": new_draft, 
+                "summary": f"Plan updated with {num_phases} phases, {total_steps} total steps"
+            })
+            
+            # Persist
+            update_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
+            await database.execute(query=update_query, values={
+                "draft": json.dumps(new_draft), 
+                "id": session_id
+            })
+            await agent.emit("PERSISTENCE", {"action": "UPDATE_PLAN", "id": session_id})
+            
+            logging.debug(f"[SHAPING_MANAGER] Planner triggered after gate execution for session {session_id}")
+        except Exception as e:
+            logging.error(f"Planner trigger after gate failed for session {session_id}: {e}", exc_info=True)
 
     async def append_message(self, session_id: int, role: str, content: str) -> None:
         """
@@ -504,6 +565,28 @@ class ShapingManager:
         
         # Save updated gate state
         await self._save_gate_state(session_id, gate_result.proposed_state)
+        
+        # Get RAG data from session for planner context
+        rag_query = "SELECT rag_citations FROM shaping_sessions WHERE id = :id"
+        rag_row = await database.fetch_one(rag_query, {"id": session_id})
+        rag_data = []
+        if rag_row:
+            rag_dict = dict(rag_row)
+            citations_str = rag_dict.get("rag_citations", "[]")
+            try:
+                rag_data = json.loads(citations_str) if isinstance(citations_str, str) else citations_str
+            except Exception:
+                rag_data = []
+        
+        # Trigger planner in parallel immediately after gate state update
+        # This ensures the draft plan stays in sync with the latest gate_state.summary
+        asyncio.create_task(self._trigger_planner_after_gate(
+            session_id=session_id,
+            gate_state=gate_result.proposed_state,
+            transcript=transcript,
+            strategy=strategy,
+            rag_data=rag_data
+        ))
         
         # Format response (raw gate response)
         raw_ai_reply = await self._format_gate_response(gate_result, user_id=user_id, session_id=session_id)

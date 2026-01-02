@@ -40,7 +40,13 @@ export default function GenerationConfigSection({
     onValidationChange
 }: GenerationConfigSectionProps) {
     const [isExpanded, setIsExpanded] = useState(true);
-    const [config, setConfig] = useState({
+    const [config, setConfig] = useState<{
+        temperature: number;
+        max_output_tokens: number;
+        top_p: number;
+        top_k: number;
+        [key: string]: any;
+    }>({
         temperature: value?.temperature ?? 0.7,
         max_output_tokens: value?.max_output_tokens ?? 8192,
         top_p: value?.top_p ?? 0.95,
@@ -54,11 +60,11 @@ export default function GenerationConfigSection({
     }, [config]);
 
     const handleChange = (key: string, newValue: number) => {
-        setConfig(prev => ({ ...prev, [key]: newValue }));
+        setConfig((prev: typeof config) => ({ ...prev, [key]: newValue }));
     };
 
     const applyPreset = (presetName: keyof typeof PRESETS) => {
-        setConfig(prev => ({ ...prev, ...PRESETS[presetName] }));
+        setConfig((prev: typeof config) => ({ ...prev, ...PRESETS[presetName] }));
     };
 
     return (
