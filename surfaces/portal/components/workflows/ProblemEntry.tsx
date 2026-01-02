@@ -18,14 +18,18 @@ interface ProblemEntryProps {
 
 export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
     const [query, setQuery] = useState("");
-    const [loading, setLoading] = useState(false);
+    // Removed loading state - navigation is now immediate
 
     const handleDiagnose = async () => {
         if (!query.trim()) return;
-        setLoading(true);
+        
+        // IMMEDIATELY navigate to SELECTION view (optimistic navigation)
+        // This allows the workflow builder screen to render while backend processes
+        onDiagnose([], query); // Empty results initially, query passed for display
+        
+        // Make API call in background (non-blocking)
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            // Call the stateful Shaping/Persistence endpoint
             const res = await fetch(`${apiUrl}/api/workflows/shaping/start`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -33,35 +37,22 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
             });
             const data = await res.json();
 
-            // Pass session_id up to the parent
+            // Debug logging
+            console.log("Start shaping response:", data);
+            console.log("Session ID from backend:", data.session_id);
+
+            // Update with real results (triggers re-render with candidates)
             onDiagnose(data.candidates || [], query, data.session_id);
 
             // Trigger Sidebar Refresh
             window.dispatchEvent(new Event('refresh-sidebar'));
         } catch (e) {
             console.error("Diagnosis failed", e);
-            // Mock fallback for demo if backend not ready
-            onDiagnose([
-                {
-                    recipe_name: "Compliance Audit",
-                    goal: "Audit patient records for missing signatures",
-                    match_score: 0.85,
-                    missing_info: ["Audit Period", "Department"],
-                    reasoning: "High overlap with 'compliance' keyword and patient context.",
-                    origin: "standard"
-                },
-                {
-                    recipe_name: "Crisis Intervention",
-                    goal: "Immediate protocol for high-risk patient",
-                    match_score: 0.45,
-                    missing_info: ["Patient ID", "Severity Score", "Location"],
-                    reasoning: "Mention of 'risk' but intent unclear.",
-                    origin: "standard"
-                }
-            ], query);
-        } finally {
-            setLoading(false);
+            // Keep query visible, results will be empty (can show error in workflow builder)
+            // User is already on the workflow builder screen, so they can see the error state
+            onDiagnose([], query);
         }
+        // Note: No loading state needed since navigation is immediate
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -87,13 +78,9 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
             {/* Main Input - Light Theme */}
             <div className="w-full relative group z-10">
                 <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-purple-500/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-                <div className={`relative bg-white border border-[#E5E7EB] rounded-xl shadow-sm flex items-center p-1.5 transition-all group-hover:border-blue-400/30 group-hover:shadow-md ${loading ? 'opacity-75' : ''}`}>
+                <div className="relative bg-white border border-[#E5E7EB] rounded-xl shadow-sm flex items-center p-1.5 transition-all group-hover:border-blue-400/30 group-hover:shadow-md">
                     <div className="pl-3 pr-2 text-[#9CA3AF]">
-                        {loading ? (
-                            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                        ) : (
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                        )}
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
                     <input
                         type="text"
@@ -103,12 +90,10 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
                         className="flex-1 bg-transparent border-none text-base text-[#1A1A1A] placeholder-[#9CA3AF] focus:outline-none focus:ring-0 py-2 font-light"
                         placeholder="e.g. Patient intake errors..."
                         autoFocus
-                        disabled={loading}
                     />
                     <button
                         onClick={() => query.trim() && handleDiagnose()}
-                        disabled={loading}
-                        className="bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+                        className="bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-lg px-3 py-1.5 transition-colors"
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
                     </button>

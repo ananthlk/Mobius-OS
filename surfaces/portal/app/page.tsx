@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Shield } from "lucide-react";
+import MobiusIcon from "@/components/MobiusIcon";
 
 export default function Home() {
     return (
@@ -24,25 +25,9 @@ export default function Home() {
                 <div className="mt-[10vh] mb-8 animate-in fade-in zoom-in-95 duration-1000">
                     <div className="h-[80px] w-auto aspect-[100/60] mx-auto relative group">
                         <div className="absolute inset-0 bg-blue-500 opacity-0 group-hover:opacity-10 blur-xl rounded-full transition-opacity duration-700"></div>
-                        <svg viewBox="0 0 100 60" className="h-full w-full drop-shadow-sm">
-                            <defs>
-                                <linearGradient id="flow-hero" x1="0%" y1="0%" x2="200%" y2="0%">
-                                    <stop offset="0%" stopColor="#4285F4" />
-                                    <stop offset="12.5%" stopColor="#EA4335" />
-                                    <stop offset="25%" stopColor="#FBBC05" />
-                                    <stop offset="37.5%" stopColor="#34A853" />
-                                    <stop offset="50%" stopColor="#4285F4" />
-                                    <stop offset="62.5%" stopColor="#EA4335" />
-                                    <stop offset="75%" stopColor="#FBBC05" />
-                                    <stop offset="87.5%" stopColor="#34A853" />
-                                    <stop offset="100%" stopColor="#4285F4" />
-                                    <animate attributeName="x1" from="0%" to="-100%" dur="4s" repeatCount="indefinite" />
-                                    <animate attributeName="x2" from="200%" to="100%" dur="4s" repeatCount="indefinite" />
-                                </linearGradient>
-                            </defs>
-                            <path d="M30 30 C30 15, 45 15, 50 30 C55 45, 70 45, 70 30 C70 15, 55 15, 50 30 C45 45, 30 45, 30 30"
-                                stroke="url(#flow-hero)" strokeWidth="5" fill="none" strokeLinecap="round" />
-                        </svg>
+                        <div className="h-full w-full drop-shadow-sm">
+                            <MobiusIcon className="h-full w-full" animated={true} />
+                        </div>
                     </div>
                 </div>
 

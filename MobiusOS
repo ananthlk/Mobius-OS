@@ -7,8 +7,8 @@ echo "🌀 Awakening Mobius OS..."
 
 # 1. Kill existing processes on ports 3000 (Portal) and 8000 (Nexus)
 echo "   [1/4] Clearing neural pathways (Ports 3000, 8000)..."
-lsof -ti:3000 | xargs kill -9 2>/dev/null
-lsof -ti:8000 | xargs kill -9 2>/dev/null
+lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+lsof -ti:8000 | xargs kill -9 2>/dev/null || true
 
 # 2. Ensure Database is running
 echo "   [2/4] Checking emotional memory (PostgreSQL)..."

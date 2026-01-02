@@ -120,8 +120,42 @@ class ConfigManager:
         """
         Centralizes the logic for "Which model should be used?".
         Delegates to LLMGovernance but acts as the single point of contact for the App.
+        Automatically enriches the context with provider secrets (api_key, project_id, location, base_url).
         """
         from nexus.modules.llm_governance import llm_governance
-        return await llm_governance.resolve_model(module_id, user_id, override_model)
+        model_context = await llm_governance.resolve_model(module_id, user_id, override_model)
+        
+        # Automatically enrich with provider secrets
+        provider_name = model_context.get("provider_name")
+        if provider_name:
+            from nexus.modules.crypto import decrypt
+            
+            query = "SELECT id, provider_type, base_url FROM llm_providers WHERE name = :name AND is_active = true"
+            provider_row = await database.fetch_one(query, {"name": provider_name})
+            
+            if provider_row:
+                provider = dict(provider_row)  # Convert row to dict for .get() method
+                
+                # Fetch & decrypt configs
+                config_query = "SELECT config_key, encrypted_value, is_secret FROM llm_config WHERE provider_id = :pid"
+                rows = await database.fetch_all(config_query, {"pid": provider["id"]})
+                
+                secrets = {}
+                for row in rows:
+                    val = row["encrypted_value"]
+                    if row["is_secret"]:
+                        val = decrypt(val)
+                    secrets[row["config_key"]] = val
+                
+                # Enrich model_context
+                model_context.update({
+                    "api_key": secrets.get("api_key"),
+                    "project_id": secrets.get("project_id"),
+                    "location": secrets.get("location", "us-central1"),
+                    "base_url": provider.get("base_url"),
+                    "provider_type": provider.get("provider_type")
+                })
+        
+        return model_context
         
 config_manager = ConfigManager()

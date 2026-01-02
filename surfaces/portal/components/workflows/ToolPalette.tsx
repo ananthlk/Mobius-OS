@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface ToolSchema {
     name: string;
@@ -8,7 +9,17 @@ interface ToolSchema {
     parameters: Record<string, string>;
 }
 
-export default function ToolPalette({ onSelectTool }: { onSelectTool: (tool: ToolSchema) => void }) {
+interface ToolPaletteProps {
+    onSelectTool: (tool: ToolSchema) => void;
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
+}
+
+export default function ToolPalette({ 
+    onSelectTool, 
+    collapsed = false, 
+    onToggleCollapse 
+}: ToolPaletteProps) {
     const [tools, setTools] = useState<ToolSchema[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -27,7 +38,34 @@ export default function ToolPalette({ onSelectTool }: { onSelectTool: (tool: Too
     }, []);
 
     return (
-        <div className="w-72 bg-neutral-900/50 backdrop-blur-xl border-r border-white/5 p-6 flex flex-col h-full shadow-2xl z-20">
+        <div className="relative flex h-full">
+            {/* Collapse/Expand Button - Outside the panel, on the border */}
+            {onToggleCollapse && (
+                <button
+                    onClick={onToggleCollapse}
+                    className={`
+                        absolute left-0 top-6 z-30 p-1.5 rounded-r-lg
+                        bg-neutral-800 hover:bg-neutral-700 text-white/70 hover:text-white
+                        border border-neutral-700 border-l-0 shadow-lg
+                        transition-all duration-200
+                        ${collapsed ? '-translate-x-full' : ''}
+                    `}
+                    title={collapsed ? "Show Toolkit" : "Hide Toolkit"}
+                >
+                    {collapsed ? (
+                        <ChevronRight className="w-4 h-4" />
+                    ) : (
+                        <ChevronLeft className="w-4 h-4" />
+                    )}
+                </button>
+            )}
+
+            {/* Panel */}
+            <div className={`
+                bg-neutral-900/50 backdrop-blur-xl border-r border-white/5 
+                p-6 flex flex-col h-full shadow-2xl z-20 transition-all duration-300
+                ${collapsed ? 'w-0 p-0 opacity-0 overflow-hidden border-none' : 'w-72'}
+            `}>
             <div className="flex items-center justify-between mb-8">
                 <h2 className="text-white/60 font-medium text-xs tracking-[0.2em]">TOOLKIT</h2>
                 <div className="w-2 h-2 rounded-full bg-emerald-500/50 animate-pulse"></div>
@@ -64,6 +102,7 @@ export default function ToolPalette({ onSelectTool }: { onSelectTool: (tool: Too
                     ))}
                 </div>
             )}
+            </div>
         </div>
     );
 }

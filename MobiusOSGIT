@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Mobius OS - Git Commit & Push Workflow
+# Usage: MobiusOSGIT [commit message]
+# Works from any directory
+
+# Find project root (resolve symlinks to actual script location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # If relative symlink, resolve relative to original directory
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "❌ Error: Not in a git repository"
+    echo "   Current directory: $(pwd)"
+    exit 1
+fi
+
+# Get commit message from argument or prompt
+if [ -z "$1" ]; then
+    echo "📝 Enter commit message (or press Enter for auto-generated):"
+    read -r COMMIT_MSG
+    if [ -z "$COMMIT_MSG" ]; then
+        # Auto-generate from git status
+        COMMIT_MSG="Update: $(date +'%Y-%m-%d %H:%M')"
+    fi
+else
+    COMMIT_MSG="$1"
+fi
+
+echo "🔄 Staging changes..."
+git add -A
+
+echo "📦 Committing: $COMMIT_MSG"
+if ! git commit -m "$COMMIT_MSG"; then
+    echo "❌ Commit failed (maybe no changes to commit?)"
+    exit 1
+fi
+
+echo "🚀 Pushing to remote..."
+if ! git push; then
+    echo "❌ Push failed. Check your git remote configuration."
+    exit 1
+fi
+
+echo "✅ Done! Changes pushed to remote."
+

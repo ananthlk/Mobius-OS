@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Mobius OS - Sync External Conversations
+# Usage: MobiusOSSync [source] [user_id]
+# Syncs conversations from external sources (Cursor, etc.) to the interactions table
+
+# Find project root (resolve symlinks to actual script location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # If relative symlink, resolve relative to original directory
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+SOURCE="${1:-cursor}"
+USER_ID="${2:-$(whoami)}"
+API_URL="${MOBIUS_API_URL:-http://localhost:8000}"
+
+echo "🔄 Syncing $SOURCE conversations to Mobius OS..."
+echo "   User: $USER_ID"
+echo "   API: $API_URL"
+echo ""
+
+# Check if virtual environment exists
+if [ ! -f "$PROJECT_ROOT/venv311/bin/activate" ]; then
+    echo "   ❌ Error: Virtual environment not found"
+    exit 1
+fi
+
+source "$PROJECT_ROOT/venv311/bin/activate"
+export PYTHONPATH="$PROJECT_ROOT"
+export SOURCE="$SOURCE"
+export USER_ID="$USER_ID"
+export API_URL="$API_URL"
+
+# Run Python sync script (use the dedicated script file)
+python3 "$PROJECT_ROOT/sync_cursor_chat.py"
+exit $?
+

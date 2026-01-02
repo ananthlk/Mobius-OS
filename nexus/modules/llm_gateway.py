@@ -120,24 +120,37 @@ class LLMGateway:
         vertexai.init(project=project_id, location=location)
         
         # Default Model
-        target_model = model_id or "gemini-2.5-flash" 
-        model = GenerativeModel(target_model)
+        target_model = model_id or "gemini-2.5-flash"
         
-        # Convert Messages (OpenAI format -> Vertex format)
-        # Simple/Naive conversion for now
-        history = []
-        last_user_msg = ""
+        # Extract system instruction and user messages
+        system_instruction = None
+        user_messages = []
         
         for m in messages:
-            role = "user" if m["role"] == "user" else "model"
-            if role == "user":
-                last_user_msg = m["content"]
-            else:
-                history.append({"role": role, "parts": [Part.from_text(m["content"])]})
-                
+            if m["role"] == "system":
+                system_instruction = m["content"]
+            elif m["role"] == "user":
+                user_messages.append(m["content"])
+            # Ignore "assistant" or "model" messages for now (could build history if needed)
+        
+        # Combine all user messages into one (or use the last one)
+        # For conversational agent, there should only be one user message
+        user_content = "\n\n".join(user_messages) if user_messages else ""
+        
+        if not user_content:
+            raise ValueError("No user message found in messages")
+        
+        # Create model
+        model = GenerativeModel(target_model)
+        
+        # For Vertex AI, prepend system_instruction to prompt if provided
+        # (This matches the approach used in llm_service.py for consistency)
+        full_prompt = user_content
+        if system_instruction:
+            full_prompt = f"{system_instruction}\n\n{user_content}"
+        
         # Generate
-        chat = model.start_chat(history=[]) # Stateless for simplicity here, or map history
-        response = await chat.send_message_async(last_user_msg)
+        response = await model.generate_content_async(full_prompt)
         
         return {
             "content": response.text,

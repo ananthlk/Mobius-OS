@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# Mobius OS - Production Build Workflow
+# Usage: MobiusOSBuild
+# Works from any directory
+
+# Find project root (resolve symlinks to actual script location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # If relative symlink, resolve relative to original directory
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+PROJECT="${GCP_PROJECT:-mobiusos-482817}"
+REGION="${GCP_REGION:-us-central1}"
+
+echo "🏗️  Building Mobius OS for Production..."
+echo "   Project Root: $PROJECT_ROOT"
+echo "   GCP Project: $PROJECT"
+echo "   Region: $REGION"
+echo ""
+
+# Check if gcloud is installed
+if ! command -v gcloud &> /dev/null; then
+    echo "❌ Error: gcloud CLI not found"
+    echo "   Install: https://cloud.google.com/sdk/docs/install"
+    exit 1
+fi
+
+# Check if gcloud is authenticated
+if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q .; then
+    echo "❌ Error: Not authenticated with gcloud"
+    echo "   Run: gcloud auth login"
+    exit 1
+fi
+
+# Check if cloudbuild.yaml exists
+if [ ! -f "$PROJECT_ROOT/cloudbuild.yaml" ]; then
+    echo "❌ Error: cloudbuild.yaml not found at $PROJECT_ROOT/cloudbuild.yaml"
+    exit 1
+fi
+
+# Check if deploy script exists
+if [ ! -f "$PROJECT_ROOT/deploy_cloud_run.sh" ]; then
+    echo "❌ Error: deploy_cloud_run.sh not found at $PROJECT_ROOT/deploy_cloud_run.sh"
+    exit 1
+fi
+
+# Set project
+gcloud config set project "$PROJECT"
+
+echo "📦 [1/2] Building Docker images via Cloud Build..."
+cd "$PROJECT_ROOT"
+if ! gcloud builds submit --config cloudbuild.yaml; then
+    echo "❌ Build failed!"
+    exit 1
+fi
+
+echo ""
+echo "🚀 [2/2] Deploying to Cloud Run..."
+if ! bash "$PROJECT_ROOT/deploy_cloud_run.sh"; then
+    echo "❌ Deployment failed!"
+    exit 1
+fi
+
+echo ""
+echo "✅ Production build complete!"
+echo "   Check status: gcloud run services list"
+

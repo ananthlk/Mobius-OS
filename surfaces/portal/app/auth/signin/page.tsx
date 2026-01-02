@@ -1,4 +1,5 @@
 import { signIn } from "@/auth";
+import MobiusIcon from "@/components/MobiusIcon";
 
 export default function SignIn() {
     return (
@@ -8,18 +9,7 @@ export default function SignIn() {
 
                 {/* Logo */}
                 <div className="mb-4">
-                    <svg viewBox="0 0 100 100" className="w-12 h-12">
-                        <path d="M50 15 C70 15 85 30 85 50 C85 70 70 85 50 85 C30 85 15 70 15 50 C15 30 30 15 50 15"
-                            stroke="url(#grad1)" strokeWidth="10" strokeLinecap="round" fill="none" />
-                        <defs>
-                            <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" style={{ stopColor: "#4285F4", stopOpacity: 1 }} />
-                                <stop offset="33%" style={{ stopColor: "#EA4335", stopOpacity: 1 }} />
-                                <stop offset="66%" style={{ stopColor: "#FBBC05", stopOpacity: 1 }} />
-                                <stop offset="100%" style={{ stopColor: "#34A853", stopOpacity: 1 }} />
-                            </linearGradient>
-                        </defs>
-                    </svg>
+                    <MobiusIcon size={48} />
                 </div>
 
                 <h1 className="text-2xl font-normal text-[var(--text-primary)] mb-2">Sign in</h1>

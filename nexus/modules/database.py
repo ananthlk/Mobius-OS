@@ -1,13 +1,35 @@
 from databases import Database
 import os
+import json
+import logging
+from typing import Any, Dict
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Suppress databases library DEBUG logging (queries)
+# This prevents database INSERT/UPDATE/SELECT queries from cluttering server logs
+logging.getLogger("databases").setLevel(logging.WARNING)
+# Also suppress SQLAlchemy if used
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
 # Create the database instance
 database = Database(DATABASE_URL)
+
+def parse_jsonb(value: Any) -> Any:
+    """
+    Helper to parse JSONB values from PostgreSQL.
+    PostgreSQL returns JSONB as strings, so we need to parse them.
+    Returns the value as-is if it's already a dict/list, or parses it if it's a string.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    return value
 
 async def connect_to_db():
     await database.connect()
@@ -129,3 +151,104 @@ async def init_db():
         print("Migration 009 (Vertex Fix) applied.")
     except Exception as e:
          print(f"Migration 009 Error: {e}")
+
+    # 010: Workflow Rich Logging
+    try:
+        sql = read_migration("010_workflow_rich_logging.sql")
+        # Split by ; to run multiple statements
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 010 (Rich Logs) applied.")
+    except Exception as e:
+         print(f"Migration 010 Error: {e}")
+
+    # 011: Memory Events
+    try:
+        sql = read_migration("011_memory_events.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 011 (Memory Events) applied.")
+    except Exception as e:
+         print(f"Migration 011 Error: {e}")
+
+    # 012: Fix Trace Logs FK
+    try:
+        sql = read_migration("012_fix_trace_logs_fk.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 012 (Fix Trace Logs FK) applied.")
+    except Exception as e:
+         print(f"Migration 012 Error: {e}")
+
+    # 013: Session State Table
+    try:
+        sql = read_migration("013_session_state.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 013 (Session State) applied.")
+    except Exception as e:
+         print(f"Migration 013 Error: {e}")
+
+    # 014: Prompt Management
+    try:
+        sql = read_migration("014_prompt_management.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 014 (Prompt Management) applied.")
+    except Exception as e:
+         print(f"Migration 014 Error: {e}")
+
+    # 015: Restructure Prompt Keys
+    try:
+        sql = read_migration("015_restructure_prompt_keys.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 015 (Restructure Prompt Keys) applied.")
+    except Exception as e:
+        print(f"Migration 015 Error: {e}")
+
+    # 016: Gate State (if exists)
+    try:
+        sql = read_migration("015_gate_state.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 015 (Gate State) applied.")
+    except Exception as e:
+        print(f"Migration 015 (Gate State) Error: {e}")
+
+    # 017: Journey State
+    try:
+        sql = read_migration("017_journey_state.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 017 (Journey State) applied.")
+    except Exception as e:
+        print(f"Migration 017 Error: {e}")
+
+    # 018: Tool Library
+    try:
+        sql = read_migration("018_tool_library.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 018 (Tool Library) applied.")
+    except Exception as e:
+        print(f"Migration 018 Error: {e}")
+
+    # 019: Tool Conditional Execution
+    try:
+        sql = read_migration("019_tool_conditional_execution.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 019 (Tool Conditional Execution) applied.")
+    except Exception as e:
+        print(f"Migration 019 Error: {e}")

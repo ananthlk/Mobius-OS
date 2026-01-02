@@ -3,6 +3,7 @@ from nexus.modules.database import database
 from nexus.modules.config_manager import config_manager
 import logging
 import os
+import json
 
 logger = logging.getLogger("nexus.llm_service")
 
@@ -543,5 +544,364 @@ class LLMService:
             })
             
             return -1
+
+    async def generate_text(
+        self, 
+        prompt: str, 
+        system_instruction: str = None, 
+        model_context: Dict = None,
+        generation_config: Dict = None,
+        return_metadata: bool = False
+    ) -> str | tuple[str, Dict[str, Any]]:
+        """
+        Unified generation method.
+        NOW REAL EXECUTION via Google Gemini (Studio or Vertex).
+        
+        Args:
+            prompt: The user query or compiled prompt.
+            system_instruction: Optional system role (if not already baked into prompt).
+            model_context: Dict containing resolved model info {model_id, api_key, project_id, location, etc.}
+            generation_config: Optional dict with temperature, max_output_tokens, top_p, top_k, etc.
+                              If None, uses defaults or prompt-specific config.
+            return_metadata: If True, returns tuple (text, metadata). If False, returns just text.
+        
+        Returns:
+            If return_metadata=False: str (text response)
+            If return_metadata=True: tuple[str, Dict] (text, metadata dict with tokens, finish_reason, etc.)
+        """
+        if not model_context:
+            # Fallback for legacy calls (should be avoided)
+            logger.warning("generate_text called without model_context! Using fallback.")
+            model_context = {"model_id": "gemini-1.5-flash", "source": "legacy_fallback"}
+
+        model_id = model_context.get("model_id", "gemini-1.5-flash")
+        source = model_context.get("source", "unknown")
+        
+        # Use provided generation_config, or fallback to defaults
+        if not generation_config:
+            generation_config = {
+                "temperature": 0.4 if "plan" in str(system_instruction).lower() else 0.7,
+                "max_output_tokens": 8192,
+                "top_p": 0.95,
+                "top_k": 40,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+            }
+        
+        logger.debug(f"🤖 [LLM_SERVICE] Execution | Model: {model_id} | Source: {source}")
+        logger.debug(f"   📥 Prompt Length: {len(prompt)} chars")
+        logger.debug(f"   ⚙️  Generation Config: temp={generation_config.get('temperature')}, max_tokens={generation_config.get('max_output_tokens')}")
+
+        try:
+            # --- PATH A: AI STUDIO (API KEY) ---
+            api_key = model_context.get("api_key")
+            provider_name = model_context.get("provider_name", "").lower()
+            base_url = model_context.get("base_url")
+
+            # 1. GOOGLE (Vertex or Studio)
+            if "google" in provider_name or "vertex" in provider_name:
+                provider_type = model_context.get("provider_type")
+                
+                # VERTEX AI: Use service account credentials (ADC) - no API keys
+                if provider_type == "vertex":
+                    if not model_context.get("project_id"):
+                        raise ValueError("Vertex AI requires 'project_id' in configuration. API keys are not supported for Vertex AI.")
+                    
+                    import vertexai
+                    from vertexai.generative_models import GenerativeModel
+                    
+                    location = model_context.get("location", "us-central1")
+                    vertexai.init(project=model_context.get("project_id"), location=location)
+                    
+                    model = GenerativeModel(model_id)
+                    
+                    # For Vertex AI, prepend system_instruction to prompt if provided
+                    full_prompt = prompt
+                    if system_instruction:
+                        full_prompt = f"{system_instruction}\n\n{prompt}"
+                    
+                    vertex_config = {
+                        "temperature": generation_config.get("temperature", 0.4),
+                        "max_output_tokens": generation_config.get("max_output_tokens") or generation_config.get("max_tokens", 8192)
+                    }
+                    response = await model.generate_content_async(full_prompt, generation_config=vertex_config)
+                    text = response.text
+                    # Response will be printed in gate_engine instead
+                    # logger.debug(f"   ⚡️ Vertex Response: {text[:100]}...")
+                    
+                    # Extract metadata
+                    metadata = {}
+                    max_output_tokens = vertex_config.get("max_output_tokens", 8192)
+                    
+                    # Try multiple ways to get usage metadata from Vertex AI
+                    usage_metadata = None
+                    if hasattr(response, 'usage_metadata'):
+                        usage_metadata = response.usage_metadata
+                    elif hasattr(response, 'candidates') and len(response.candidates) > 0:
+                        # Sometimes usage_metadata is on the candidate
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'usage_metadata'):
+                            usage_metadata = candidate.usage_metadata
+                    
+                    if usage_metadata:
+                        # Try different attribute names for token counts
+                        prompt_tokens = (
+                            getattr(usage_metadata, 'prompt_token_count', None) or
+                            getattr(usage_metadata, 'prompt_tokens', None) or
+                            0
+                        )
+                        completion_tokens = (
+                            getattr(usage_metadata, 'candidates_token_count', None) or
+                            getattr(usage_metadata, 'completion_tokens', None) or
+                            0
+                        )
+                        total_tokens = (
+                            getattr(usage_metadata, 'total_token_count', None) or
+                            getattr(usage_metadata, 'total_tokens', None) or
+                            (prompt_tokens + completion_tokens if prompt_tokens and completion_tokens else 0)
+                        )
+                        
+                        metadata = {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens if total_tokens else (prompt_tokens + completion_tokens),
+                            "completion_percent": round((completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 and completion_tokens > 0 else 0
+                        }
+                    else:
+                        # Fallback: estimate tokens (rough approximation: 1 token ≈ 4 characters)
+                        estimated_prompt_tokens = len(full_prompt) // 4
+                        estimated_completion_tokens = len(text) // 4
+                        metadata = {
+                            "prompt_tokens": estimated_prompt_tokens,
+                            "completion_tokens": estimated_completion_tokens,
+                            "total_tokens": estimated_prompt_tokens + estimated_completion_tokens,
+                            "completion_percent": round((estimated_completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 else 0,
+                            "estimated": True  # Flag to indicate this is an estimate
+                        }
+                    
+                    if hasattr(response, 'candidates') and len(response.candidates) > 0:
+                        candidate = response.candidates[0]
+                        finish_reason_raw = getattr(candidate, 'finish_reason', None)
+                        
+                        # Convert enum to readable string
+                        if finish_reason_raw is not None:
+                            if hasattr(finish_reason_raw, 'name'):
+                                # It's an enum with .name attribute
+                                metadata["finish_reason"] = finish_reason_raw.name
+                            elif isinstance(finish_reason_raw, int):
+                                # Map enum integer values to names
+                                finish_reason_map = {
+                                    0: "FINISH_REASON_UNSPECIFIED",
+                                    1: "STOP",
+                                    2: "MAX_TOKENS",
+                                    3: "SAFETY",
+                                    4: "RECITATION",
+                                    5: "OTHER"
+                                }
+                                metadata["finish_reason"] = finish_reason_map.get(finish_reason_raw, f"UNKNOWN({finish_reason_raw})")
+                            else:
+                                metadata["finish_reason"] = str(finish_reason_raw)
+                        else:
+                            metadata["finish_reason"] = "UNKNOWN"
+                        
+                        if hasattr(candidate, 'safety_ratings'):
+                            metadata["safety_ratings"] = [r.rating.name if hasattr(r.rating, 'name') else str(r.rating) for r in candidate.safety_ratings]
+                    
+                    if return_metadata:
+                        return text, metadata
+                    return text
+                
+                # AI STUDIO: Use API key (google.generativeai SDK)
+                elif api_key and len(api_key) > 10:
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key)
+                    
+                    # Use generation_config from parameter (already set above)
+                    google_config = {
+                        "temperature": generation_config.get("temperature", 0.7),
+                        "top_p": generation_config.get("top_p", 0.95),
+                        "top_k": generation_config.get("top_k", 40),
+                        "max_output_tokens": generation_config.get("max_output_tokens") or generation_config.get("max_tokens", 8192),
+                    }
+                    
+                    model = genai.GenerativeModel(
+                        model_name=model_id,
+                        system_instruction=system_instruction,
+                        generation_config=google_config
+                    )
+                    
+                    response = await model.generate_content_async(full_prompt)
+                    text = response.text
+                    # Response will be printed in gate_engine instead
+                    # logger.debug(f"   ⚡️ Studio Response: {text[:100]}...")
+                    
+                    # Extract metadata (same logic as Vertex AI)
+                    metadata = {}
+                    max_output_tokens = google_config.get("max_output_tokens", 8192)
+                    
+                    # Try multiple ways to get usage metadata
+                    usage_metadata = None
+                    if hasattr(response, 'usage_metadata'):
+                        usage_metadata = response.usage_metadata
+                    elif hasattr(response, 'candidates') and len(response.candidates) > 0:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'usage_metadata'):
+                            usage_metadata = candidate.usage_metadata
+                    
+                    if usage_metadata:
+                        prompt_tokens = (
+                            getattr(usage_metadata, 'prompt_token_count', None) or
+                            getattr(usage_metadata, 'prompt_tokens', None) or
+                            0
+                        )
+                        completion_tokens = (
+                            getattr(usage_metadata, 'candidates_token_count', None) or
+                            getattr(usage_metadata, 'completion_tokens', None) or
+                            0
+                        )
+                        total_tokens = (
+                            getattr(usage_metadata, 'total_token_count', None) or
+                            getattr(usage_metadata, 'total_tokens', None) or
+                            (prompt_tokens + completion_tokens if prompt_tokens and completion_tokens else 0)
+                        )
+                        
+                        metadata = {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens if total_tokens else (prompt_tokens + completion_tokens),
+                            "completion_percent": round((completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 and completion_tokens > 0 else 0
+                        }
+                    else:
+                        # Fallback: estimate tokens
+                        estimated_prompt_tokens = len(full_prompt) // 4
+                        estimated_completion_tokens = len(text) // 4
+                        metadata = {
+                            "prompt_tokens": estimated_prompt_tokens,
+                            "completion_tokens": estimated_completion_tokens,
+                            "total_tokens": estimated_prompt_tokens + estimated_completion_tokens,
+                            "completion_percent": round((estimated_completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 else 0,
+                            "estimated": True
+                        }
+                    
+                    if hasattr(response, 'candidates') and len(response.candidates) > 0:
+                        candidate = response.candidates[0]
+                        finish_reason_raw = getattr(candidate, 'finish_reason', None)
+                        
+                        # Convert enum to readable string
+                        if finish_reason_raw is not None:
+                            if hasattr(finish_reason_raw, 'name'):
+                                metadata["finish_reason"] = finish_reason_raw.name
+                            elif isinstance(finish_reason_raw, int):
+                                finish_reason_map = {
+                                    0: "FINISH_REASON_UNSPECIFIED",
+                                    1: "STOP",
+                                    2: "MAX_TOKENS",
+                                    3: "SAFETY",
+                                    4: "RECITATION",
+                                    5: "OTHER"
+                                }
+                                metadata["finish_reason"] = finish_reason_map.get(finish_reason_raw, f"UNKNOWN({finish_reason_raw})")
+                            else:
+                                metadata["finish_reason"] = str(finish_reason_raw)
+                        else:
+                            metadata["finish_reason"] = "UNKNOWN"
+                        
+                        if hasattr(candidate, 'safety_ratings'):
+                            metadata["safety_ratings"] = [r.rating.name if hasattr(r.rating, 'name') else str(r.rating) for r in candidate.safety_ratings]
+                    
+                    if return_metadata:
+                        return text, metadata
+                    return text
+
+            # 2. OPENAI COMPATIBLE (Ollama, OpenAI, DeepSeek, etc.)
+            # This covers the local llama3.1 case
+            from openai import AsyncOpenAI
+            
+            # Default to local ollama if no URL provided but provider is generic
+            if not base_url and "ollama" in provider_name:
+                base_url = "http://localhost:11434/v1"
+            
+            client = AsyncOpenAI(
+                api_key=api_key or "ollama", # Ollama doesn't care, but SDK needs non-empty
+                base_url=base_url
+            )
+            
+            messages = []
+            if system_instruction:
+                messages.append({"role": "system", "content": system_instruction})
+            messages.append({"role": "user", "content": prompt})
+            
+            openai_config = {
+                "model": model_id,
+                "messages": messages,
+                "temperature": generation_config.get("temperature", 0.7),
+            }
+            # Add optional parameters if provided
+            if generation_config.get("max_output_tokens") or generation_config.get("max_tokens"):
+                openai_config["max_tokens"] = generation_config.get("max_output_tokens") or generation_config.get("max_tokens")
+            if generation_config.get("top_p"):
+                openai_config["top_p"] = generation_config["top_p"]
+            if generation_config.get("frequency_penalty") is not None:
+                openai_config["frequency_penalty"] = generation_config["frequency_penalty"]
+            if generation_config.get("presence_penalty") is not None:
+                openai_config["presence_penalty"] = generation_config["presence_penalty"]
+            
+            response = await client.chat.completions.create(**openai_config)
+            
+            text = response.choices[0].message.content
+            # Response will be printed in gate_engine instead
+            # logger.debug(f"   ⚡️ Generic/Ollama Response: {text[:100]}...")
+            
+            # Extract metadata
+            metadata = {}
+            max_output_tokens = generation_config.get("max_output_tokens") or generation_config.get("max_tokens", 8192)
+            if hasattr(response, 'usage'):
+                usage = response.usage
+                prompt_tokens = getattr(usage, 'prompt_tokens', 0)
+                completion_tokens = getattr(usage, 'completion_tokens', 0)
+                total_tokens = getattr(usage, 'total_tokens', 0)
+                metadata = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "completion_percent": round((completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 and completion_tokens > 0 else 0
+                }
+            else:
+                # Fallback: estimate tokens
+                estimated_prompt_tokens = len(prompt) // 4
+                if system_instruction:
+                    estimated_prompt_tokens += len(system_instruction) // 4
+                estimated_completion_tokens = len(text) // 4
+                metadata = {
+                    "prompt_tokens": estimated_prompt_tokens,
+                    "completion_tokens": estimated_completion_tokens,
+                    "total_tokens": estimated_prompt_tokens + estimated_completion_tokens,
+                    "completion_percent": round((estimated_completion_tokens / max_output_tokens) * 100, 1) if max_output_tokens > 0 else 0,
+                    "estimated": True
+                }
+            
+            if hasattr(response, 'choices') and len(response.choices) > 0:
+                finish_reason = getattr(response.choices[0], 'finish_reason', None)
+                # OpenAI finish_reason is usually already a string, but handle enum case
+                if finish_reason:
+                    if hasattr(finish_reason, 'value'):
+                        metadata["finish_reason"] = finish_reason.value
+                    elif isinstance(finish_reason, str):
+                        metadata["finish_reason"] = finish_reason
+                    else:
+                        metadata["finish_reason"] = str(finish_reason)
+                else:
+                    metadata["finish_reason"] = "UNKNOWN"
+            
+            if return_metadata:
+                return text, metadata
+            return text
+
+        except Exception as e:
+            logger.error(f"❌ LLM Execution Failed: {e}")
+            error_text = f"Error: {str(e)}"
+            if return_metadata:
+                return error_text, {"error": str(e)}
+            return error_text
 
 llm_service = LLMService()

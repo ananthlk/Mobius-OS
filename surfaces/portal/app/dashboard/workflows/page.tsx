@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ToolPalette from "@/components/workflows/ToolPalette";
 import StepEditor from "@/components/workflows/StepEditor";
 import ProblemEntry from "@/components/workflows/ProblemEntry";
 import SolutionRail from "@/components/workflows/SolutionRail";
 import ShapingChat from "@/components/workflows/ShapingChat";
+import ProgressHeader, { ProgressState } from "@/components/ProgressHeader";
+import { normalizeProgressState, fetchJourneyState } from "@/utils/progressHelpers";
 
 interface Step {
     id: string;
@@ -53,28 +55,103 @@ export default function WorkflowBuilder() {
     const [steps, setSteps] = useState<Step[]>([]);
     const [selectedSchemaMap, setSelectedSchemaMap] = useState<Record<string, any>>({});
     const [searchQuery, setSearchQuery] = useState("");
-    const [currentSessionId, setCurrentSessionId] = useState<number | null>(null); // New State
+    const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+    const [isToolPaletteCollapsed, setIsToolPaletteCollapsed] = useState(false);
+    const [isInitializing, setIsInitializing] = useState(false); // Track if we're waiting for initial API response
 
     // Selection State
     const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
 
 
+    // Draft State
+    const [draftPlan, setDraftPlan] = useState<any | null>(null);
+
+    // Progress State
+    const [progressState, setProgressState] = useState<ProgressState>({});
+    
+    // Poll for journey state updates when session is active
+    useEffect(() => {
+        if (!currentSessionId) return;
+        
+        const interval = setInterval(async () => {
+            try {
+                const journeyState = await fetchJourneyState(currentSessionId);
+                if (journeyState) {
+                    setProgressState(journeyState);
+                }
+            } catch (error) {
+                // Silently fail - journey state might not exist yet
+                console.debug("Journey state not available yet");
+            }
+        }, 2000); // Poll every 2 seconds
+        
+        return () => clearInterval(interval);
+    }, [currentSessionId]);
+
     // Handlers
-    const handleDiagnose = (results: any[], query: string, sessionId?: number) => {
+    const handleDiagnose = async (results: any[], query: string, sessionId?: number) => {
         setDiagnosticResults(results);
         setSearchQuery(query);
-        if (sessionId) setCurrentSessionId(sessionId);
-        setViewMode("SELECTION");
+        if (sessionId) {
+            setCurrentSessionId(sessionId);
+            setIsInitializing(false); // We have a session, initialization complete
+            
+            // Fetch initial session state to populate progress
+            try {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}`);
+                const sessionData = await res.json();
+                await handleSessionUpdate(sessionData);
+            } catch (e) {
+                console.error("Failed to fetch initial session state", e);
+            }
+        } else {
+            setIsInitializing(results.length === 0); // Still initializing if no results and no session
+        }
+        setViewMode("SELECTION"); // Navigate immediately - don't wait for API response
     };
 
-    const handleShapingUpdate = (newQuery: string) => {
-        // Mock: Reshuffle or adjust scores based on "new insight"
-        // In real backend, this would call /api/diagnose/refine
+    const handleShapingUpdate = async (newQuery: string) => {
+        // 1. If we have a session, fetch the latest draft plan and journey state
+        if (currentSessionId) {
+            try {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const [sessionRes, journeyRes] = await Promise.all([
+                    fetch(`${apiUrl}/api/workflows/shaping/${currentSessionId}`),
+                    fetch(`${apiUrl}/api/workflows/shaping/${currentSessionId}/journey-state`).catch(() => null)
+                ]);
+                
+                const sessionData = await sessionRes.json();
+
+                if (sessionData.draft_plan && Object.keys(sessionData.draft_plan).length > 0) {
+                    setDraftPlan(sessionData.draft_plan);
+                }
+                
+                // Update journey state if available
+                if (journeyRes && journeyRes.ok) {
+                    const journeyData = await journeyRes.json();
+                    setProgressState({
+                        domain: journeyData.domain,
+                        strategy: journeyData.strategy,
+                        currentStep: journeyData.current_step,
+                        percentComplete: journeyData.percent_complete ?? 0,
+                        status: journeyData.status
+                    });
+                } else {
+                    // Fallback to session data
+                    const progress = normalizeProgressState(sessionData, searchQuery);
+                    setProgressState(progress);
+                }
+            } catch (e) {
+                console.error("Failed to fetch draft", e);
+            }
+        }
+
+        // 2. Keep the existing match logic for the "Searching" phase
         const shuffled = [...diagnosticResults].map(r => ({
             ...r,
-            match_score: Math.random() * 0.5 + 0.4 // Randomize score to show "Thinking"
+            match_score: Math.random() * 0.5 + 0.4
         })).sort((a, b) => b.match_score - a.match_score);
-
         setDiagnosticResults(shuffled);
     };
 
@@ -82,14 +159,145 @@ export default function WorkflowBuilder() {
         setSelectedSolutionId(sol.recipe_name);
     };
 
-    const handleAdopt = () => {
+    const updateDraftPlan = async (updates: any) => {
+        if (!currentSessionId) return;
+        
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const response = await fetch(`${apiUrl}/api/workflows/shaping/${currentSessionId}/draft-plan`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(updates),
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to update draft plan");
+            }
+
+            const updatedPlan = await response.json();
+            setDraftPlan(updatedPlan);
+        } catch (error) {
+            console.error("Failed to update draft plan:", error);
+            alert("Failed to update draft plan. Please try again.");
+        }
+    };
+
+    const handleStepUpdate = async (stepId: string, updatedStep: any) => {
+        if (!draftPlan || !draftPlan.steps) return;
+
+        const updatedSteps = draftPlan.steps.map((s: any) => 
+            s.id === stepId ? updatedStep : s
+        );
+
+        await updateDraftPlan({ steps: updatedSteps });
+    };
+
+    const handleStepDelete = async (stepId: string) => {
+        if (!draftPlan || !draftPlan.steps) return;
+
+        const updatedSteps = draftPlan.steps.filter((s: any) => s.id !== stepId);
+        await updateDraftPlan({ steps: updatedSteps });
+    };
+
+    const handleStepReorder = async (newOrder: any[]) => {
+        await updateDraftPlan({ steps: newOrder });
+    };
+
+    const handleStepCreate = async (newStep: any) => {
+        if (!draftPlan) return;
+
+        const updatedSteps = [...(draftPlan.steps || []), newStep];
+        await updateDraftPlan({ steps: updatedSteps });
+    };
+
+    const handleAdopt = async () => {
         const sol = diagnosticResults.find(s => s.recipe_name === selectedSolutionId);
         if (!sol) return;
 
-        setName(sol.name);
-        setGoal(sol.description);
-        setSteps(sol.steps.map((s: any) => ({ ...s, args_mapping: s.args_mapping || {} })));
-        setViewMode("EDITOR");
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            
+            // Fetch full recipe details and tool schemas in parallel
+            const [recipeRes, toolsRes] = await Promise.all([
+                fetch(`${apiUrl}/api/workflows/${sol.recipe_name}`),
+                fetch(`${apiUrl}/api/workflows/tools`)
+            ]);
+            
+            const recipe = await recipeRes.json();
+            const tools = await toolsRes.json();
+            
+            // Create a map of tool schemas for quick lookup
+            const toolsMap: Record<string, any> = {};
+            tools.forEach((tool: any) => {
+                toolsMap[tool.name] = tool;
+            });
+
+            if (recipe && recipe.steps) {
+                // Convert recipe steps to editor format
+                const stepsArray: Step[] = [];
+                const schemaMap: Record<string, any> = {};
+
+                // Build steps in order (follow transition chain)
+                const visited = new Set<string>();
+                let currentStepId = recipe.start_step_id || Object.keys(recipe.steps)[0];
+                
+                while (currentStepId && !visited.has(currentStepId)) {
+                    visited.add(currentStepId);
+                    const step = recipe.steps[currentStepId];
+                    if (step) {
+                        stepsArray.push({
+                            id: step.step_id || currentStepId,
+                            tool_name: step.tool_name,
+                            description: step.description || "",
+                            args_mapping: step.args_mapping || {}
+                        });
+                        // Use actual tool schema if available, otherwise create placeholder
+                        schemaMap[step.tool_name] = toolsMap[step.tool_name] || {
+                            name: step.tool_name,
+                            description: step.description || "",
+                            parameters: {}
+                        };
+                        currentStepId = step.transition_success || null;
+                    } else {
+                        break;
+                    }
+                }
+
+                // If transition chain approach didn't work, fallback to all steps
+                if (stepsArray.length === 0 && recipe.steps) {
+                    Object.entries(recipe.steps).forEach(([stepId, step]: [string, any]) => {
+                        stepsArray.push({
+                            id: step.step_id || stepId,
+                            tool_name: step.tool_name,
+                            description: step.description || "",
+                            args_mapping: step.args_mapping || {}
+                        });
+                        schemaMap[step.tool_name] = toolsMap[step.tool_name] || {
+                            name: step.tool_name,
+                            description: step.description || "",
+                            parameters: {}
+                        };
+                    });
+                }
+
+                setName(recipe.name || sol.recipe_name);
+                setGoal(recipe.goal || sol.goal);
+                setSteps(stepsArray);
+                setSelectedSchemaMap(schemaMap);
+                setViewMode("EDITOR");
+            } else {
+                // Fallback if recipe structure is different
+                setName(sol.recipe_name);
+                setGoal(sol.goal);
+                setSteps([]);
+                setViewMode("EDITOR");
+            }
+        } catch (error) {
+            console.error("Failed to load recipe", error);
+            alert("Failed to load workflow details. Please try again.");
+        }
     };
 
     // --- EDITOR HANDLERS (Reused) ---
@@ -122,9 +330,66 @@ export default function WorkflowBuilder() {
             alert("Please provide a name and at least one step.");
             return;
         }
-        alert("Workflow Saved! (Mock)");
+        
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            
+            // Convert steps array to the format expected by the backend
+            const stepsDict: Record<string, any> = {};
+            steps.forEach((step, idx) => {
+                stepsDict[step.id] = {
+                    tool_name: step.tool_name,
+                    description: step.description,
+                    args_mapping: step.args_mapping
+                };
+            });
+            
+            const response = await fetch(`${apiUrl}/api/workflows/`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: name,
+                    goal: goal || name,
+                    steps: stepsDict,
+                    start_step_id: steps.length > 0 ? steps[0].id : ""
+                })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || "Failed to save workflow");
+            }
+            
+            const result = await response.json();
+            alert(`Workflow "${name}" saved successfully!`);
+            
+            // Optionally reset form or navigate
+            // setViewMode("ENTRY");
+        } catch (error: any) {
+            console.error("Save failed", error);
+            alert(`Failed to save workflow: ${error.message}`);
+        }
     };
 
+
+    const handleSessionUpdate = async (data: any) => {
+        if (data.draft_plan) {
+            setDraftPlan(data.draft_plan);
+        }
+        
+        // Try to fetch journey state directly (more efficient)
+        if (currentSessionId) {
+            const journeyState = await fetchJourneyState(currentSessionId);
+            if (journeyState) {
+                setProgressState(journeyState);
+                return; // Use journey state if available
+            }
+        }
+        
+        // Fallback: Extract and normalize progress state from session data
+        const progress = normalizeProgressState(data, searchQuery);
+        setProgressState(progress);
+    };
 
     // --- RENDER ---
     return (
@@ -140,16 +405,36 @@ export default function WorkflowBuilder() {
 
             {/* VIEW: SELECTION (SHAPING SPLIT VIEW) */}
             {viewMode === "SELECTION" && (
-                <div className="w-full h-full flex relative z-10 bg-[#F9FAFB] p-6 gap-6">
+                <div className="w-full h-full flex flex-col relative z-10 bg-[#F9FAFB]">
+                    {/* Progress Header */}
+                    <ProgressHeader progress={progressState} />
+                    
+                    <div className="flex-1 flex p-6 gap-6 min-h-0">
+                    {/* Loading overlay - only show if we're waiting for initial API response */}
+                    {isInitializing && diagnosticResults.length === 0 && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50 rounded-2xl">
+                            <div className="text-center">
+                                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                <p className="text-sm text-gray-600 font-medium">Initializing workflow builder...</p>
+                                <p className="text-xs text-gray-400 mt-1">Analyzing your request</p>
+                            </div>
+                        </div>
+                    )}
                     {/* Left Rail: Dynamic Solutions */}
-                    <div className="w-[340px] flex-shrink-0 flex flex-col h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="w-[420px] flex-shrink-0 flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden">
                         <SolutionRail
                             solutions={diagnosticResults}
                             selectedId={selectedSolutionId}
                             onSelect={handleSelectSolution}
+                            draftPlan={draftPlan}
+                            sessionId={currentSessionId}
+                            onStepUpdate={handleStepUpdate}
+                            onStepDelete={handleStepDelete}
+                            onStepReorder={handleStepReorder}
+                            onStepCreate={handleStepCreate}
                         />
                         {/* Adopt Button at bottom of rail */}
-                        <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+                        <div className="p-4 border-t-2 border-gray-300 bg-gray-50">
                             <button
                                 onClick={handleAdopt}
                                 disabled={!selectedSolutionId}
@@ -161,13 +446,15 @@ export default function WorkflowBuilder() {
                     </div>
 
                     {/* Main Area: Shaping Chat */}
-                    <div className="flex-1 h-full min-w-0">
+                    <div className="flex-1 h-full min-w-0 max-w-3xl">
                         {/* Using the original query as seed */}
                         <ShapingChat
                             initialQuery={searchQuery || "I have a problem..."}
                             onUpdate={handleShapingUpdate}
+                            onSessionUpdate={handleSessionUpdate}
                             sessionId={currentSessionId}
                         />
+                    </div>
                     </div>
                 </div>
             )}
@@ -175,12 +462,20 @@ export default function WorkflowBuilder() {
 
             {/* VIEW: EDITOR */}
             {viewMode === "EDITOR" && (
-                <div className="w-full h-full flex relative z-10">
-                    <ToolPalette onSelectTool={handleAddStep} />
+                <div className="w-full h-full flex flex-col relative z-10">
+                    {/* Progress Header */}
+                    <ProgressHeader progress={progressState} />
+                    
+                    <div className="flex-1 flex min-h-0">
+                        <ToolPalette 
+                            onSelectTool={handleAddStep}
+                            collapsed={isToolPaletteCollapsed}
+                            onToggleCollapse={() => setIsToolPaletteCollapsed(!isToolPaletteCollapsed)}
+                        />
 
-                    <div className="flex-1 flex flex-col h-full relative z-10 bg-[#F9FAFB]">
-                        {/* Header */}
-                        <div className="h-20 border-b border-[#E5E7EB] flex items-center justify-between px-8 bg-white/80 backdrop-blur-xl z-20 sticky top-0">
+                        <div className="flex-1 flex flex-col h-full relative z-10 bg-[#F9FAFB]">
+                            {/* Header */}
+                            <div className="h-20 border-b border-[#E5E7EB] flex items-center justify-between px-8 bg-white/80 backdrop-blur-xl z-20 sticky top-0">
                             <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-3">
                                     <input
@@ -238,6 +533,7 @@ export default function WorkflowBuilder() {
                                     </div>
                                 </div>
                             </div>
+                        </div>
                         </div>
                     </div>
                 </div>

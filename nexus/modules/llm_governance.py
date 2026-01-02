@@ -40,36 +40,30 @@ class LLMGovernance:
             # Better to require it exists in catalog. 
             pass 
 
-        # 2. User Preference (Module Level)
-        query_user = """
+        # 2-4. Parallelize all preference/rule queries for better performance
+        import asyncio
+        
+        query_user_module = """
             SELECT m.model_id, p.name as provider_name
             FROM user_llm_preferences pref
             JOIN llm_models m ON pref.model_id = m.id
             JOIN llm_providers p ON m.provider_id = p.id
             WHERE pref.user_id = :uid AND pref.module_id = :mid
         """
-        row = await database.fetch_one(query_user, {"uid": user_id, "mid": module_id})
-        if row:
-            return {**dict(row), "source": "user_module_pref"}
-
-        # 2.5 User Preference (Global Level)
-        row = await database.fetch_one(query_user, {"uid": user_id, "mid": "all"})
-        if row:
-            return {**dict(row), "source": "user_global_pref"}
-
-        # 3. System Module Default
-        query_system = """
+        query_user_global = """
+            SELECT m.model_id, p.name as provider_name
+            FROM user_llm_preferences pref
+            JOIN llm_models m ON pref.model_id = m.id
+            JOIN llm_providers p ON m.provider_id = p.id
+            WHERE pref.user_id = :uid AND pref.module_id = 'all'
+        """
+        query_system_module = """
             SELECT m.model_id, p.name as provider_name
             FROM llm_system_rules r
             JOIN llm_models m ON r.model_id = m.id
             JOIN llm_providers p ON m.provider_id = p.id
             WHERE r.rule_type = 'MODULE' AND r.module_id = :mid
         """
-        row = await database.fetch_one(query_system, {"mid": module_id})
-        if row:
-            return {**dict(row), "source": "system_module_default"}
-
-        # 4. System Global Default
         query_system_global = """
             SELECT m.model_id, p.name as provider_name
             FROM llm_system_rules r
@@ -77,9 +71,28 @@ class LLMGovernance:
             JOIN llm_providers p ON m.provider_id = p.id
             WHERE r.rule_type = 'GLOBAL'
         """
-        row = await database.fetch_one(query_system_global)
-        if row:
-            return {**dict(row), "source": "system_global_default"}
+        
+        # Execute all queries in parallel
+        user_module_row, user_global_row, system_module_row, system_global_row = await asyncio.gather(
+            database.fetch_one(query_user_module, {"uid": user_id, "mid": module_id}),
+            database.fetch_one(query_user_global, {"uid": user_id}),
+            database.fetch_one(query_system_module, {"mid": module_id}),
+            database.fetch_one(query_system_global),
+            return_exceptions=True
+        )
+        
+        # Check results in priority order
+        if user_module_row and not isinstance(user_module_row, Exception):
+            return {**dict(user_module_row), "source": "user_module_pref"}
+        
+        if user_global_row and not isinstance(user_global_row, Exception):
+            return {**dict(user_global_row), "source": "user_global_pref"}
+        
+        if system_module_row and not isinstance(system_module_row, Exception):
+            return {**dict(system_module_row), "source": "system_module_default"}
+        
+        if system_global_row and not isinstance(system_global_row, Exception):
+            return {**dict(system_global_row), "source": "system_global_default"}
         
         # 5. Fail Safe
         return {

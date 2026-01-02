@@ -15,15 +15,22 @@ export default function ChatPage() {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    const sendMessage = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const sendMessage = async (e?: React.FormEvent | React.KeyboardEvent) => {
+        if (e) e.preventDefault();
         if (!input.trim()) return;
 
         const userMsg = { role: "user", content: input };
         const newHistory = [...messages, userMsg];
         setMessages(newHistory);
+        const messageToSend = input;
         setInput("");
         setLoading(true);
+        
+        // Reset textarea height
+        const textarea = document.querySelector('textarea');
+        if (textarea) {
+            textarea.style.height = 'auto';
+        }
 
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -73,7 +80,7 @@ export default function ChatPage() {
 
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] md:max-w-[70%] rounded-[20px] px-6 py-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user'
+                        <div className={`max-w-[80%] md:max-w-[70%] rounded-[20px] px-6 py-4 text-[15px] leading-relaxed shadow-sm break-words overflow-wrap-anywhere ${msg.role === 'user'
                             ? 'bg-[#E8F0FE] text-[#1f1f1f] rounded-tr-none' // User: Light Blue (Google User style)
                             : 'bg-white border border-gray-100 text-[#1f1f1f] rounded-tl-none' // Assistant: White
                             }`}>
@@ -97,11 +104,24 @@ export default function ChatPage() {
             <div className="p-4 md:p-6 w-full max-w-4xl mx-auto">
                 <div className="bg-[#F0F4F8] rounded-full flex items-center px-2 py-2 focus-within:bg-white focus-within:shadow-md focus-within:ring-1 focus-within:ring-gray-200 transition-all">
                     <form onSubmit={sendMessage} className="flex-1 flex px-2">
-                        <input
-                            className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-[#1f1f1f] placeholder-[#5F6368]"
+                        <textarea
+                            className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-[#1f1f1f] placeholder-[#5F6368] resize-none overflow-hidden break-words"
                             placeholder="Ask Mobius a question..."
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
+                            rows={1}
+                            style={{ minHeight: '40px', maxHeight: '120px' }}
+                            onInput={(e) => {
+                                const target = e.target as HTMLTextAreaElement;
+                                target.style.height = 'auto';
+                                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    sendMessage(e);
+                                }
+                            }}
                         />
                         <button
                             type="submit"

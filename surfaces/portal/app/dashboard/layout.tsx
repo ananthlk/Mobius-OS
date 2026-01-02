@@ -1,10 +1,11 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { Plus, MessageSquare, GitBranch, Database, Settings } from "lucide-react";
+import { Plus, MessageSquare, GitBranch, Database, Settings, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import MobiusIcon from "@/components/MobiusIcon";
 
 export default function DashboardLayout({
     children,
@@ -52,7 +53,7 @@ export default function DashboardLayout({
                 `}
             >
                 <div className="flex items-center gap-3 px-4 mb-8 mt-2 min-w-max">
-                    <div className="w-8 h-8 rounded-full border-[3px] border-l-[#4285F4] border-t-[#EA4335] border-r-[#FBBC05] border-b-[#34A853]"></div>
+                    <MobiusIcon size={32} />
                     <span className="font-semibold text-xl text-[#5F6368]">Mobius</span>
                 </div>
 
@@ -114,14 +115,17 @@ export default function DashboardLayout({
 
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col relative bg-white m-2 rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all duration-300">
-                {/* Toggle Button (Absolute Pinned) */}
+                {/* Toggle Button - Positioned on the left edge, always visible */}
                 <button
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                    className="absolute top-4 left-4 z-50 p-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                    className="absolute top-6 left-0 z-50 p-2 rounded-r-lg bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 border border-gray-300 border-l-0 shadow-md transition-all duration-200"
+                    title={isSidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
                 >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
+                    {isSidebarOpen ? (
+                        <ChevronLeft className="w-5 h-5" />
+                    ) : (
+                        <ChevronRight className="w-5 h-5" />
+                    )}
                 </button>
 
                 {children}

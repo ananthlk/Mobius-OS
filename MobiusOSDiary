@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# Mobius OS - Development Diary Updater with LLM Prose
+# Usage: MobiusOSDiary
+# Tracks changes since last invocation and generates beautiful prose diary entry
+# Works from any directory
+
+# Find project root (resolve symlinks to actual script location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # If relative symlink, resolve relative to original directory
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+DIARY_DIR="$PROJECT_ROOT/continuum/stream"
+LAST_RUN_FILE="$PROJECT_ROOT/.mobius_diary_last_run"
+TODAY=$(date +'%Y-%m-%d')
+DIARY_FILE="$DIARY_DIR/diary_${TODAY}.md"
+
+# Create diary directory if it doesn't exist
+mkdir -p "$DIARY_DIR"
+
+# Get last run timestamp
+if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_RUN=$(cat "$LAST_RUN_FILE")
+else
+    # If no last run, use 24 hours ago
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        LAST_RUN=$(date -u -v-24H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+    else
+        # Linux
+        LAST_RUN=$(date -u -d '24 hours ago' +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+    fi
+fi
+
+echo "📔 Updating Mobius Development Diary..."
+echo "   Project Root: $PROJECT_ROOT"
+echo "   Last run: ${LAST_RUN:-'Never'}"
+echo "   Today: $TODAY"
+echo ""
+
+# Collect data for diary
+echo "   Collecting development metrics..."
+
+# Collect conversation/session context
+CONVERSATION_CONTEXT=""
+
+# Option 1: Check for session log file
+SESSION_LOG="$PROJECT_ROOT/.mobius_session_log.md"
+if [ -f "$SESSION_LOG" ]; then
+    echo "   📝 Found session log file"
+    CONVERSATION_CONTEXT=$(cat "$SESSION_LOG" | head -2000)  # Limit to 2000 chars
+fi
+
+# Option 2: Check environment variable
+if [ -z "$CONVERSATION_CONTEXT" ] && [ -n "$MOBIUS_SESSION_LOG" ]; then
+    echo "   📝 Using session log from environment"
+    CONVERSATION_CONTEXT="$MOBIUS_SESSION_LOG"
+fi
+
+# Option 3: Try to fetch from database (if available)
+if [ -z "$CONVERSATION_CONTEXT" ]; then
+    echo "   📝 Checking database for recent interactions..."
+    # This will be handled by Python script if DB is available
+fi
+
+# Count lines of code
+PYTHON_LINES=$(find "$PROJECT_ROOT/nexus" -name "*.py" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+TSX_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.tsx" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+TS_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.ts" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+
+# Collect git activity
+COMMITS=""
+NEW_FILES=""
+DELETED_FILES=""
+MODIFIED_FILES=""
+
+if git -C "$PROJECT_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    if [ -n "$LAST_RUN" ]; then
+        COMMITS=$(git -C "$PROJECT_ROOT" log --since="$LAST_RUN" --pretty=format:"%h|%ar|%s" --date=relative 2>/dev/null | head -10)
+        NEW_FILES=$(git -C "$PROJECT_ROOT" log --since="$LAST_RUN" --diff-filter=A --name-only --pretty=format: 2>/dev/null | grep -E '\.(py|tsx|ts|js)$' | sort -u | head -20)
+        DELETED_FILES=$(git -C "$PROJECT_ROOT" log --since="$LAST_RUN" --diff-filter=D --name-only --pretty=format: 2>/dev/null | grep -E '\.(py|tsx|ts|js)$' | sort -u | head -20)
+        MODIFIED_FILES=$(git -C "$PROJECT_ROOT" log --since="$LAST_RUN" --diff-filter=M --name-only --pretty=format: 2>/dev/null | grep -E '\.(py|tsx|ts|js)$' | sort -u | head -20)
+    else
+        COMMITS=$(git -C "$PROJECT_ROOT" log -10 --pretty=format:"%h|%ar|%s" --date=relative 2>/dev/null)
+    fi
+fi
+
+# Create data file for Python script
+DATA_FILE=$(mktemp)
+
+# Escape conversation context for JSON
+CONVERSATION_JSON=$(echo "$CONVERSATION_CONTEXT" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo "\"\"")
+
+# Build JSON manually if jq is not available, otherwise use jq
+if command -v jq &> /dev/null; then
+    # Use jq for proper JSON construction
+    {
+        echo "{"
+        echo "  \"last_run\": \"${LAST_RUN}\","
+        echo "  \"today\": \"${TODAY}\","
+        echo "  \"python_lines\": ${PYTHON_LINES},"
+        echo "  \"typescript_lines\": $((TSX_LINES + TS_LINES)),"
+        echo "  \"conversation_context\": ${CONVERSATION_JSON},"
+        echo "  \"commits\": $(echo "$COMMITS" | jq -R -s -c 'split("\n") | map(select(. != "")) | map(split("|") | {hash: .[0], time: .[1], message: .[2]})' 2>/dev/null || echo "[]"),"
+        echo "  \"new_files\": $(echo "$NEW_FILES" | jq -R -s -c 'split("\n") | map(select(. != ""))' 2>/dev/null || echo "[]"),"
+        echo "  \"deleted_files\": $(echo "$DELETED_FILES" | jq -R -s -c 'split("\n") | map(select(. != ""))' 2>/dev/null || echo "[]"),"
+        echo "  \"modified_files\": $(echo "$MODIFIED_FILES" | jq -R -s -c 'split("\n") | map(select(. != ""))' 2>/dev/null || echo "[]")"
+        echo "}"
+    } > "$DATA_FILE"
+else
+    # Fallback: simple JSON without jq
+    {
+        echo "{"
+        echo "  \"last_run\": \"${LAST_RUN}\","
+        echo "  \"today\": \"${TODAY}\","
+        echo "  \"python_lines\": ${PYTHON_LINES},"
+        echo "  \"typescript_lines\": $((TSX_LINES + TS_LINES)),"
+        echo "  \"conversation_context\": ${CONVERSATION_JSON},"
+        echo "  \"commits\": [],"
+        echo "  \"new_files\": [],"
+        echo "  \"deleted_files\": [],"
+        echo "  \"modified_files\": []"
+        echo "}"
+    } > "$DATA_FILE"
+fi
+
+echo "   Generating beautiful prose with LLM..."
+echo "   (Fetching conversation context from database if available...)"
+
+# Check if virtual environment exists
+if [ ! -f "$PROJECT_ROOT/venv311/bin/activate" ]; then
+    echo "   ❌ Error: Virtual environment not found at $PROJECT_ROOT/venv311"
+    echo "   Please create it first: python3 -m venv venv311"
+    rm -f "$DATA_FILE"
+    exit 1
+fi
+
+# Call Python script to generate diary entry
+source "$PROJECT_ROOT/venv311/bin/activate"
+export PYTHONPATH="$PROJECT_ROOT"
+export DATA_FILE="$DATA_FILE"
+export PROJECT_ROOT="$PROJECT_ROOT"
+
+# Capture stderr for database fetch messages, but suppress LLM errors
+PROSE=$(python3 << 'PYTHON_SCRIPT' 2> >(grep -E "(✓|Fetched|interactions)" || grep -vE "(LLM|Error|Failed|Could not)" || true)
+import asyncio
+import sys
+import json
+import os
+
+# Add project root to path
+project_root = os.environ.get('PROJECT_ROOT', os.getcwd())
+sys.path.insert(0, project_root)
+
+try:
+    from nexus.brains.diary_brain import diary_brain
+    
+    async def main():
+        data_file = os.environ.get('DATA_FILE', '')
+        if not data_file:
+            print("Error: DATA_FILE not set", file=sys.stderr)
+            sys.exit(1)
+        
+        try:
+            with open(data_file, 'r') as f:
+                data = json.load(f)
+            
+            # Try to fetch conversation from database if not in data
+            if not data.get('conversation_context'):
+                try:
+                    from nexus.modules.database import database
+                    from nexus.modules.config_manager import config_manager
+                    import os
+                    from dotenv import load_dotenv
+                    
+                    # Load environment for database connection
+                    load_dotenv(os.path.join(project_root, 'nexus', '.env'))
+                    
+                    # Try to connect and fetch recent interactions
+                    try:
+                        await database.connect()
+                        
+                        # Get interactions since last diary run or last 24 hours
+                        last_run = data.get('last_run', '')
+                        if last_run:
+                            # Try to parse the timestamp
+                            try:
+                                from datetime import datetime
+                                last_dt = datetime.fromisoformat(last_run.replace('Z', '+00:00'))
+                                query = """
+                                SELECT role, content, created_at 
+                                FROM interactions 
+                                WHERE created_at >= :since
+                                ORDER BY created_at ASC 
+                                LIMIT 100
+                                """
+                                interactions = await database.fetch_all(query, {"since": last_dt})
+                            except:
+                                # Fallback to 24 hours if parsing fails
+                                query = """
+                                SELECT role, content, created_at 
+                                FROM interactions 
+                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                                ORDER BY created_at ASC 
+                                LIMIT 100
+                                """
+                                interactions = await database.fetch_all(query)
+                        else:
+                            # No last run, get last 24 hours
+                            query = """
+                            SELECT role, content, created_at 
+                            FROM interactions 
+                            WHERE created_at >= NOW() - INTERVAL '24 hours'
+                            ORDER BY created_at ASC 
+                            LIMIT 100
+                            """
+                            interactions = await database.fetch_all(query)
+                        
+                        if interactions and len(interactions) > 0:
+                            conv_lines = []
+                            conv_lines.append("=== Development Session Transcript ===")
+                            for inter in interactions:  # Already in chronological order
+                                role = inter['role'].replace('portal_', '').replace('_', ' ').title()
+                                content = inter['content']
+                                # Limit content length but preserve meaning
+                                if len(content) > 800:
+                                    content = content[:800] + "... [truncated]"
+                                timestamp = inter.get('created_at', '')
+                                if timestamp:
+                                    try:
+                                        ts_str = timestamp.strftime('%H:%M') if hasattr(timestamp, 'strftime') else str(timestamp)[:5]
+                                        conv_lines.append(f"\n[{ts_str}] {role}: {content}")
+                                    except:
+                                        conv_lines.append(f"\n{role}: {content}")
+                                else:
+                                    conv_lines.append(f"\n{role}: {content}")
+                            conv_lines.append("\n=== End of Transcript ===")
+                            data['conversation_context'] = "\n".join(conv_lines)
+                            print(f"   ✓ Fetched {len(interactions)} interactions from database", file=sys.stderr)
+                        
+                        await database.disconnect()
+                    except Exception as db_err:
+                        # DB not available or query failed - silent fail
+                        pass
+                except ImportError:
+                    pass  # Import failed, skip
+            
+            prose = await diary_brain.write_entry(data)
+            if prose and not prose.startswith("Error:"):
+                print(prose)
+            else:
+                # Fallback if LLM returned error
+                raise Exception("LLM returned error")
+        except Exception as e:
+            # Fallback - don't print error (suppressed by 2>/dev/null)
+            commits_count = len(data.get('commits', []))
+            new_count = len(data.get('new_files', []))
+            print(f"Today marked another step in the evolution of Mobius OS. The codebase continues to grow, with {data.get('python_lines', 0)} lines of Python and {data.get('typescript_lines', 0)} lines of TypeScript forming the foundation of our system.")
+            if commits_count > 0:
+                print(f"\nSince the last entry, we made {commits_count} commits. {'New modules emerged' if new_count > 0 else 'The existing architecture was refined'}, each change a small step toward a more capable system.")
+            print("\nThe work continues, each line of code a thread in the larger tapestry of what Mobius OS is becoming.")
+    
+    if __name__ == "__main__":
+        asyncio.run(main())
+except ImportError as e:
+    # Fallback if module can't be imported
+    print("Today marked another step in the evolution of Mobius OS. The system continues to grow and evolve.")
+PYTHON_SCRIPT
+)
+
+# Clean up temp file
+rm -f "$DATA_FILE"
+
+# Initialize diary file if it doesn't exist
+if [ ! -f "$DIARY_FILE" ]; then
+    cat > "$DIARY_FILE" << EOF
+# Development Diary: $TODAY
+
+## Session Start: $(date +'%Y-%m-%d %H:%M:%S')
+
+EOF
+fi
+
+# Append new section with LLM-generated prose
+cat >> "$DIARY_FILE" << EOF
+
+---
+
+## Update: $(date +'%Y-%m-%d %H:%M:%S')
+
+$PROSE
+
+### 📊 Technical Metrics
+
+- **Python Codebase**: $PYTHON_LINES lines
+- **TypeScript/TSX Codebase**: $((TSX_LINES + TS_LINES)) lines
+
+EOF
+
+# Add structured data if available
+if [ -n "$COMMITS" ] && [ "$(echo "$COMMITS" | wc -l)" -gt 0 ]; then
+    cat >> "$DIARY_FILE" << EOF
+### 🔄 Recent Commits
+
+EOF
+    echo "$COMMITS" | while IFS='|' read -r hash time msg; do
+        if [ -n "$hash" ]; then
+            echo "- **\`$hash\`** ($time): $msg" >> "$DIARY_FILE"
+        fi
+    done
+    echo "" >> "$DIARY_FILE"
+fi
+
+if [ -n "$NEW_FILES" ]; then
+    cat >> "$DIARY_FILE" << EOF
+### ✨ New Modules/Files
+
+EOF
+    echo "$NEW_FILES" | while read -r file; do
+        if [ -n "$file" ]; then
+            echo "- \`$file\`" >> "$DIARY_FILE"
+        fi
+    done
+    echo "" >> "$DIARY_FILE"
+fi
+
+if [ -n "$DELETED_FILES" ]; then
+    cat >> "$DIARY_FILE" << EOF
+### 🗑️  Deleted Modules/Files
+
+EOF
+    echo "$DELETED_FILES" | while read -r file; do
+        if [ -n "$file" ]; then
+            echo "- \`$file\`" >> "$DIARY_FILE"
+        fi
+    done
+    echo "" >> "$DIARY_FILE"
+fi
+
+# Update last run timestamp
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
+else
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > "$LAST_RUN_FILE"
+fi
+
+echo "✅ Diary updated: $DIARY_FILE"
+echo "   Open with: code $DIARY_FILE"
+
