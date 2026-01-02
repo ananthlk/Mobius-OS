@@ -310,7 +310,7 @@ async def diagnose_problem(req: Dict[str, str]):
 # --- Planning Phase Endpoints ---
 
 class PlanningPhaseDecisionRequest(BaseModel):
-    choice: str  # 'build_new' or 'reuse'
+    choice: str  # 'create_new', 'execute_existing', 'guide_me', or 'refine_answers'
 
 class PlanningPhaseReviewRequest(BaseModel):
     selected_step_id: Optional[str] = None
@@ -318,7 +318,8 @@ class PlanningPhaseReviewRequest(BaseModel):
 @router.post("/shaping/{session_id}/planning-phase/decision")
 async def planning_phase_decision(session_id: int, req: PlanningPhaseDecisionRequest):
     """
-    Handle Build New vs Reuse decision.
+    Handle planning phase decision.
+    Supports: 'create_new', 'execute_existing', 'guide_me', 'refine_answers'
     """
     from nexus.brains.planning_phase import planning_phase_brain
     

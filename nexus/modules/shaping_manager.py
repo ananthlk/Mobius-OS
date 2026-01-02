@@ -406,6 +406,12 @@ class ShapingManager:
             "gate_state": gate_state_json
         })
         
+        # Set initial active_agent to 'gate'
+        await database.execute(
+            "UPDATE shaping_sessions SET active_agent = 'gate' WHERE id = :id",
+            {"id": session_id}
+        )
+        
         # NOW we have a session. Configure Agent & Stream backlog.
         agent.set_session_id(session_id)
         

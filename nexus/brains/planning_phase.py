@@ -26,10 +26,240 @@ logger.setLevel(logging.DEBUG)  # Enable debug logging
 class PlanningPhaseBrain:
     """
     Handles planning phase operations after gate completion.
+    Takes control of all planning phase announcements and message handling.
     """
     
     def __init__(self):
         self.mem = MemoryLogger("nexus.planning_phase")
+
+    async def announce_planning_phase_start(
+        self, 
+        session_id: int, 
+        user_id: str
+    ) -> None:
+        """
+        Announce the start of planning phase.
+        Formats message through conversational agent and emits buttons.
+        This is called once when transitioning from gate phase to planning phase.
+        """
+        logger.debug(f"[PlanningPhaseBrain.announce_planning_phase_start] ENTRY | session_id={session_id}, user_id={user_id}")
+        
+        agent = BaseAgent(session_id=session_id)
+        
+        # Raw announcement message
+        raw_message = """🎯 Planning Phase Started
+
+We've gathered all the information we need. Now let's build your workflow plan.
+
+What would you like to do next?"""
+        
+        # Format, emit, and persist to transcript using orchestrator helper
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        await orchestrator._format_emit_and_persist(
+            agent=agent,
+            raw_content=raw_message,
+            user_id=user_id,
+            session_id=session_id,
+            context={
+                "operation": "planning_phase_announcement",
+                "source": "planning_phase_brain"
+            }
+        )
+        
+        # Emit buttons using ActionButtonHandler
+        handler = ActionButtonHandler(agent)
+        buttons = [
+            {
+                "id": "execute_existing",
+                "label": "I have an existing saved workflow that I would like to execute",
+                "variant": "secondary",
+                "action": {
+                    "type": "api_call",
+                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "method": "POST",
+                    "payload": {"choice": "execute_existing", "user_id": user_id}
+                },
+                "enabled": False,
+                "tooltip": "Coming soon"
+            },
+            {
+                "id": "create_new",
+                "label": "I want to create a new workflow",
+                "variant": "primary",
+                "action": {
+                    "type": "api_call",
+                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "method": "POST",
+                    "payload": {"choice": "create_new", "user_id": user_id}
+                },
+                "enabled": True,
+                "icon": "add"
+            },
+            {
+                "id": "guide_me",
+                "label": "Guide me",
+                "variant": "secondary",
+                "action": {
+                    "type": "api_call",
+                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "method": "POST",
+                    "payload": {"choice": "guide_me", "user_id": user_id}
+                },
+                "enabled": False,
+                "tooltip": "Coming soon"
+            },
+            {
+                "id": "refine_answers",
+                "label": "Refine my answers (reinvoke gate stage)",
+                "variant": "secondary",
+                "action": {
+                    "type": "api_call",
+                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "method": "POST",
+                    "payload": {"choice": "refine_answers", "user_id": user_id}
+                },
+                "enabled": False,
+                "tooltip": "Coming soon"
+            }
+        ]
+        
+        await handler.emit_decision_buttons(
+            buttons=buttons,
+            decision_column="planning_phase_decision",
+            decision_table="shaping_sessions",
+            context="planning_phase_decision",
+            metadata={"phase": "planning"}
+        )
+        
+        logger.debug(f"[PlanningPhaseBrain.announce_planning_phase_start] EXIT | Announcement complete")
+    
+    async def handle_message(
+        self,
+        session_id: int,
+        message: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle a chat message in planning phase.
+        Routes to appropriate planning phase logic based on state.
+        All responses are formatted through conversational agent.
+        """
+        logger.debug(f"[PlanningPhaseBrain.handle_message] ENTRY | session_id={session_id}, message_length={len(message)}")
+        
+        agent = BaseAgent(session_id=session_id)
+        
+        # Add user message to transcript via orchestrator helper (skips gate engine)
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        await orchestrator._append_message_to_transcript(
+            session_id=session_id,
+            role="user",
+            content=message,
+            skip_gate_engine=True  # Always skip gate engine in planning phase
+        )
+        
+        # Import shaping_manager for formatting responses
+        from nexus.modules.shaping_manager import shaping_manager
+        
+        # Check if decision has been made
+        session = await self._get_session(session_id)
+        decision = session.get("planning_phase_decision") if session else None
+        
+        # If no decision made yet, check if this is a decision message
+        if not decision:
+            # Check if message is a decision choice
+            message_lower = message.lower().strip()
+            
+            # Map natural language to button choices
+            if message_lower in ["create new", "create_new", "new", "build", "build new", "i want to create a new workflow"]:
+                # handle_build_reuse_decision already emits and persists the response
+                result = await self.handle_build_reuse_decision(session_id, "create_new")
+                return result
+            elif message_lower in ["execute existing", "execute_existing", "existing workflow", "saved workflow", "i have an existing saved workflow"]:
+                # handle_build_reuse_decision already emits and persists the response
+                result = await self.handle_build_reuse_decision(session_id, "execute_existing")
+                return result
+            elif message_lower in ["guide me", "guide", "help", "help me"]:
+                # handle_build_reuse_decision already emits and persists the response
+                result = await self.handle_build_reuse_decision(session_id, "guide_me")
+                return result
+            elif message_lower in ["refine", "refine answers", "refine_answers", "reinvoke gate", "go back", "refine my answers"]:
+                # handle_build_reuse_decision already emits and persists the response
+                result = await self.handle_build_reuse_decision(session_id, "refine_answers")
+                return result
+            else:
+                # Not a decision - prompt user to make a decision
+                from nexus.conductors.workflows.orchestrator import orchestrator
+                response = "I'm ready to help you plan your workflow. Please select one of the options above to get started."
+                
+                await orchestrator._format_emit_and_persist(
+                    agent=agent,
+                    raw_content=response,
+                    user_id=user_id,
+                    session_id=session_id,
+                    context={
+                        "operation": "planning_phase_chat",
+                        "source": "planning_phase_brain"
+                    }
+                )
+                
+                return {"status": "waiting_for_decision", "message": response}
+        
+        # Decision made - handle based on next step
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        
+        if decision == "create_new" or decision == "build_new":  # Support both for backward compatibility
+            # STUB: Acknowledge all messages from planning brain
+            response = f"[Planning Phase Brain] I received your message: '{message}'. This is a stub acknowledgment to confirm messages are reaching the planning phase brain correctly. Full message handling will be implemented next."
+            
+            await orchestrator._format_emit_and_persist(
+                agent=agent,
+                raw_content=response,
+                user_id=user_id,
+                session_id=session_id,
+                context={
+                    "operation": "planning_phase_chat",
+                    "source": "planning_phase_brain",
+                    "stub": True
+                }
+            )
+            
+            return {"status": "acknowledged", "message": response}
+        
+        # Handle other decisions (execute_existing, guide_me, refine_answers)
+        elif decision in ["execute_existing", "guide_me", "refine_answers"]:
+            # STUB: Acknowledge all messages from planning brain
+            response = f"[Planning Phase Brain] I received your message: '{message}'. This is a stub acknowledgment. The '{decision}' feature is coming soon."
+            
+            await orchestrator._format_emit_and_persist(
+                agent=agent,
+                raw_content=response,
+                user_id=user_id,
+                session_id=session_id,
+                context={
+                    "operation": "planning_phase_chat",
+                    "source": "planning_phase_brain",
+                    "stub": True,
+                    "decision": decision
+                }
+            )
+            
+            return {"status": "acknowledged", "message": response}
+        
+        # Default response
+        response = f"[Planning Phase Brain] I received your message: '{message}'. This is a stub acknowledgment to confirm messages are reaching the planning phase brain correctly."
+        await orchestrator._format_emit_and_persist(
+            agent=agent,
+            raw_content=response,
+            user_id=user_id,
+            session_id=session_id,
+            context={
+                "operation": "planning_phase_chat",
+                "source": "planning_phase_brain",
+                "stub": True
+            }
+        )
+        
+        return {"status": "acknowledged", "message": response}
     
     async def handle_build_reuse_decision(
         self, 
@@ -37,11 +267,11 @@ class PlanningPhaseBrain:
         choice: str
     ) -> Dict[str, Any]:
         """
-        Handle Build New vs Reuse decision using ActionButtonHandler.
+        Handle planning phase decision using ActionButtonHandler.
         
         Args:
             session_id: Session ID
-            choice: 'build_new' or 'reuse'
+            choice: 'create_new', 'execute_existing', 'guide_me', or 'refine_answers'
         
         Returns:
             Decision result with next steps
@@ -53,23 +283,53 @@ class PlanningPhaseBrain:
         agent = BaseAgent(session_id=session_id)
         handler = ActionButtonHandler(agent)
         
+        # Get user_id from session for emitting response
+        session = await self._get_session(session_id)
+        user_id = session.get("user_id", "user_123") if session else "user_123"
+        
         # Define decision handler callback
         async def on_decision(button_id: str, decision_value: str) -> Dict[str, Any]:
             """Handle decision-specific logic."""
-            if decision_value == "build_new":
+            if decision_value == "create_new":
                 return {
                     "status": "success",
-                    "message": "Building new workflow from scratch",
+                    "message": "Great! Let's create a new workflow from scratch. I'll analyze your requirements and build a plan.",
                     "next_step": "compute_plan"
                 }
-            elif decision_value == "reuse":
+            elif decision_value == "execute_existing":
                 return {
                     "status": "not_implemented",
-                    "message": "Reuse from repository is coming soon",
+                    "message": "Executing existing saved workflows is coming soon. For now, please select 'Create a new workflow'.",
+                    "next_step": None
+                }
+            elif decision_value == "guide_me":
+                return {
+                    "status": "not_implemented",
+                    "message": "The guide me feature is coming soon. For now, please select 'Create a new workflow'.",
+                    "next_step": None
+                }
+            elif decision_value == "refine_answers":
+                return {
+                    "status": "not_implemented",
+                    "message": "Refining answers and reinvoking the gate stage is coming soon. For now, please select 'Create a new workflow'.",
                     "next_step": None
                 }
             else:
-                raise ValueError(f"Invalid choice: {decision_value}. Must be 'build_new' or 'reuse'")
+                # Backward compatibility: map old choices to new ones
+                if decision_value == "build_new":
+                    return {
+                        "status": "success",
+                        "message": "Great! Let's create a new workflow from scratch. I'll analyze your requirements and build a plan.",
+                        "next_step": "compute_plan"
+                    }
+                elif decision_value == "reuse":
+                    return {
+                        "status": "not_implemented",
+                        "message": "Reuse from repository is coming soon. For now, please select 'Create a new workflow'.",
+                        "next_step": None
+                    }
+                else:
+                    raise ValueError(f"Invalid choice: {decision_value}. Must be one of: 'create_new', 'execute_existing', 'guide_me', 'refine_answers'")
         
         # Process decision using handler
         result = await handler.process_decision(
@@ -78,6 +338,24 @@ class PlanningPhaseBrain:
             decision_column="planning_phase_decision",
             decision_table="shaping_sessions",
             on_decision=on_decision
+        )
+        
+        # Ensure planning phase is active (in case it wasn't already)
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        await orchestrator._activate_agent(session_id, "planning")
+        
+        # Emit the response message to the UI and persist to transcript using orchestrator helper
+        response_message = result.get("message", "Decision processed")
+        await orchestrator._format_emit_and_persist(
+            agent=agent,
+            raw_content=response_message,
+            user_id=user_id,
+            session_id=session_id,
+            context={
+                "operation": "planning_phase_decision_response",
+                "source": "planning_phase_brain",
+                "choice": choice
+            }
         )
         
         logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] EXIT | Returning: {result}")
