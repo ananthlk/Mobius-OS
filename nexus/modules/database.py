@@ -272,3 +272,23 @@ async def init_db():
         print("Migration 022 (Workflow Plan State) applied.")
     except Exception as e:
         print(f"Migration 022 Error: {e}")
+
+    # 023: Active Agent State
+    try:
+        sql = read_migration("023_active_agent_state.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 023 (Active Agent State) applied.")
+    except Exception as e:
+        print(f"Migration 023 Error: {e}")
+
+    # 025: Task Catalog
+    try:
+        sql = read_migration("025_task_catalog.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 025 (Task Catalog) applied.")
+    except Exception as e:
+        print(f"Migration 025 Error: {e}")

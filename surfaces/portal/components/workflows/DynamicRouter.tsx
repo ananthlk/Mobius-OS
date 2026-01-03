@@ -14,6 +14,7 @@ export interface RouterOption {
     sub_options?: RouterOption[];
     input_type?: string;
     input_placeholder?: string;
+    input_required?: boolean;
     requires_llm_parsing?: boolean;
     action?: 'continue' | 'stop' | 'show_sub_options' | 'request_input';
     action_target?: string;
@@ -60,8 +61,8 @@ export default function DynamicRouter({
             return;
         }
 
-        // Call onSelect with option
-        const value = option.type === 'input' ? inputValues[option.id] : option.value;
+        // Call onSelect with option (type is not 'input' at this point)
+        const value = option.value;
         onSelect(option.id, value);
     }, [disabled, inputValues, onSelect]);
 
@@ -71,7 +72,7 @@ export default function DynamicRouter({
 
     const handleInputSubmit = useCallback((option: RouterOption) => {
         const value = inputValues[option.id];
-        if (value && option.input_required) {
+        if (value && (!option.input_required || option.input_required)) {
             onSelect(option.id, value);
         }
     }, [inputValues, onSelect]);

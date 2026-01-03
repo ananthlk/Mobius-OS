@@ -259,7 +259,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
                             pass
                     
                     session["gate_state"] = gate_state_raw
-                    self.logger.debug(f"[ORCHESTRATOR] Loaded gate_state for session {session_id}: next_gate={gate_state_raw.get('status', {}).get('next_gate') if isinstance(gate_state_raw, dict) else 'N/A'}")
+                    # Removed verbose polling log - gate state loaded on every poll (500ms interval)
             except Exception as e:
                 # If gate_state column doesn't exist or query fails, just continue without it
                 self.logger.debug(f"Could not fetch gate_state: {e}")
@@ -287,7 +287,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
                         elif current_gate_key:
                             current_phase = "gate_phase"
                         
-                        self.logger.debug(f"[ORCHESTRATOR] Gate state from dict: current_gate_key={current_gate_key}, gates_complete={gates_complete}, phase={current_phase}")
+                        # Removed verbose polling log - gate state parsed on every poll
                     # If gate_state is a GateState object, extract from it
                     elif hasattr(gate_state_data, 'status'):
                         current_gate_key = gate_state_data.status.next_gate
@@ -297,7 +297,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
                         elif current_gate_key:
                             current_phase = "gate_phase"
                         
-                        self.logger.debug(f"[ORCHESTRATOR] Gate state from object: current_gate_key={current_gate_key}, phase={current_phase}")
+                        # Removed verbose polling log - gate state parsed on every poll
                     else:
                         self.logger.warning(f"[ORCHESTRATOR] Gate state is unexpected type: {type(gate_state_data)}")
                 
@@ -467,7 +467,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
                                 elif button_context == "gate_question" and current_phase == "gate_phase":
                                     button_gate_key = button_metadata.get("gate_key")
                                     
-                                    self.logger.debug(f"[ORCHESTRATOR] Checking button: button_gate_key={button_gate_key}, current_gate_key={current_gate_key}, gates_complete={gates_complete}")
+                                    # Removed verbose polling log - button checking happens on every poll
                                     
                                     # Only show buttons if they match current gate step
                                     if current_gate_key and button_gate_key == current_gate_key:
@@ -478,10 +478,9 @@ class WorkflowOrchestrator(BaseOrchestrator):
                                             self.logger.info(f"[ORCHESTRATOR] ✅ Matched buttons for gate '{button_gate_key}'")
                                     # If gates complete, don't show any gate buttons
                                     elif gates_complete:
-                                        self.logger.debug(f"[ORCHESTRATOR] Skipping gate buttons - gates complete")
                                         pass  # Skip gate buttons when gates are complete
                                     elif button_gate_key != current_gate_key:
-                                        self.logger.debug(f"[ORCHESTRATOR] Skipping buttons for gate '{button_gate_key}' - not current gate '{current_gate_key}'")
+                                        pass  # Skip buttons that don't match current gate
                                 
                                 # Don't add to artifacts array
                                 continue
@@ -505,10 +504,11 @@ class WorkflowOrchestrator(BaseOrchestrator):
                     if latest_draft_plan:
                         # If we have a DRAFT_PLAN artifact, use it (it's the most up-to-date)
                         session["draft_plan"] = latest_draft_plan
-                        self.logger.debug(f"[ORCHESTRATOR] ✅ Merged latest DRAFT_PLAN artifact into session (created_at: {latest_draft_plan_created_at})")
+                        # Removed verbose polling log - DRAFT_PLAN merge happens on every poll
                     elif session.get("draft_plan"):
                         # If no artifact but DB has draft_plan, keep it
-                        self.logger.debug(f"[ORCHESTRATOR] Using draft_plan from database (no newer artifact found)")
+                        # Removed verbose polling log - draft_plan check happens on every poll
+                        pass
                     else:
                         # No draft_plan at all
                         session["draft_plan"] = None
@@ -1236,45 +1236,61 @@ class WorkflowOrchestrator(BaseOrchestrator):
         Format message through conversational agent, emit OUTPUT, and persist to transcript.
         This ensures messages show up in the chat UI when frontend polls.
         
+        For system-generated or button-generated messages, set context['system_generated'] = True
+        or context['button_generated'] = True to skip conversational agent formatting.
+        
         Args:
             agent: BaseAgent instance for emission
             raw_content: Raw message content
             user_id: User identifier
             session_id: Session ID
-            context: Optional context dict for formatting
+            context: Optional context dict for formatting.
+                    Set 'system_generated' or 'button_generated' to True to skip formatting.
         
         Returns:
-            Formatted content string
+            Formatted content string (or raw_content if system/button generated)
         """
         logger.debug(f"[WorkflowOrchestrator._format_emit_and_persist] ENTRY | session_id={session_id}")
         
-        from nexus.modules.shaping_manager import shaping_manager
+        context_dict = context or {}
+        system_generated = context_dict.get("system_generated", False)
+        button_generated = context_dict.get("button_generated", False)
+        skip_formatting = system_generated or button_generated
         
-        # Format through conversational agent and emit OUTPUT (follows protocol)
-        await shaping_manager._format_and_emit_output(
-            agent=agent,
-            raw_content=raw_content,
-            user_id=user_id,
-            session_id=session_id,
-            context=context or {}
-        )
-        
-        # Get formatted content (conversational agent formats it)
-        from nexus.brains.conversational_agent import conversational_agent
-        formatting_context = {
-            "session_id": session_id,
-            **(context or {})
-        }
-        formatted_content = await conversational_agent.format_response(
-            raw_response=raw_content,
-            user_id=user_id,
-            context=formatting_context
-        )
+        if skip_formatting:
+            # For system/button-generated messages: emit directly without conversational agent
+            logger.debug(f"[WorkflowOrchestrator._format_emit_and_persist] System/button-generated message - skipping conversational agent")
+            await agent.emit("OUTPUT", {"role": "system", "content": raw_content})
+            final_content = raw_content
+        else:
+            # For user-facing messages: format through conversational agent
+            from nexus.modules.shaping_manager import shaping_manager
+            
+            # Format through conversational agent and emit OUTPUT (follows protocol)
+            await shaping_manager._format_and_emit_output(
+                agent=agent,
+                raw_content=raw_content,
+                user_id=user_id,
+                session_id=session_id,
+                context=context_dict
+            )
+            
+            # Get formatted content (conversational agent formats it)
+            from nexus.brains.conversational_agent import conversational_agent
+            formatting_context = {
+                "session_id": session_id,
+                **context_dict
+            }
+            final_content = await conversational_agent.format_response(
+                raw_response=raw_content,
+                user_id=user_id,
+                context=formatting_context
+            )
         
         # Persist to transcript so it shows up in UI when frontend polls
         session = await self.shaping_manager.get_session(session_id)
         transcript = session.get("transcript", []) if session else []
-        transcript.append({"role": "system", "content": formatted_content, "timestamp": "now"})
+        transcript.append({"role": "system", "content": final_content, "timestamp": "now"})
         
         # Update transcript in database
         await database.execute(
@@ -1282,8 +1298,8 @@ class WorkflowOrchestrator(BaseOrchestrator):
             {"transcript": json.dumps(transcript), "id": session_id}
         )
         
-        logger.debug(f"[WorkflowOrchestrator._format_emit_and_persist] EXIT | Message persisted to transcript")
-        return formatted_content
+        logger.debug(f"[WorkflowOrchestrator._format_emit_and_persist] EXIT | Message persisted to transcript (system_generated={skip_formatting})")
+        return final_content
     
     async def _activate_agent(self, session_id: int, agent: str) -> None:
         """

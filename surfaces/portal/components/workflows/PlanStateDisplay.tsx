@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { CheckCircle, Clock, Play, Pause, XCircle, AlertCircle, Tool } from 'lucide-react';
+import { CheckCircle, Clock, Play, Pause, XCircle, AlertCircle, Wrench } from 'lucide-react';
 
 export interface PlanState {
     status: 'draft' | 'user_review' | 'user_approved' | 'planned_for_execution' | 'executing' | 'completed' | 'failed' | 'cancelled';
@@ -152,7 +152,7 @@ export default function PlanStateDisplay({
                                         {step.tool && (
                                             <div className="mt-2 p-2 bg-white rounded border border-gray-200">
                                                 <div className="flex items-center gap-2 mb-2">
-                                                    <Tool size={14} className="text-blue-600" />
+                                                    <Wrench size={14} className="text-blue-600" />
                                                     <span className="text-sm font-medium text-blue-600">
                                                         {step.tool.tool_name}
                                                     </span>

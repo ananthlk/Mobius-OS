@@ -626,8 +626,19 @@ class LLMService:
                     }
                     response = await model.generate_content_async(full_prompt, generation_config=vertex_config)
                     text = response.text
-                    # Response will be printed in gate_engine instead
-                    # logger.debug(f"   ⚡️ Vertex Response: {text[:100]}...")
+                    
+                    # Log the actual prompt and response for debugging
+                    logger.debug(f"   📤 [LLM_SERVICE] Full prompt sent ({len(full_prompt)} chars)")
+                    if len(full_prompt) > 1000:
+                        logger.debug(f"   📤 [LLM_SERVICE] Prompt preview (first 1000 chars):\n{full_prompt[:1000]}...")
+                    else:
+                        logger.debug(f"   📤 [LLM_SERVICE] Full prompt:\n{full_prompt}")
+                    
+                    logger.debug(f"   📥 [LLM_SERVICE] Response received ({len(text)} chars)")
+                    if len(text) > 1000:
+                        logger.debug(f"   📥 [LLM_SERVICE] Response preview (first 1000 chars):\n{text[:1000]}...")
+                    else:
+                        logger.debug(f"   📥 [LLM_SERVICE] Full response:\n{text}")
                     
                     # Extract metadata
                     metadata = {}

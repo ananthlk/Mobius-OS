@@ -8,6 +8,10 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
     datefmt="%H:%M:%S"
 )
+
+# Hide uvicorn access logs (GET/POST requests) to reduce noise
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 load_dotenv() # Load env vars immediately
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +24,7 @@ from nexus.modules.admin_endpoints import router as admin_router
 from nexus.modules.external_logging import router as external_router
 from nexus.modules.prompt_endpoints import router as prompt_router
 from nexus.modules.gate_endpoints import router as gate_router
+from nexus.modules.task_catalog_endpoints import router as task_catalog_router
 from nexus.modules.database import connect_to_db, disconnect_from_db, init_db
 from nexus.recipes.crm_recipes import register_crm_recipes
 
@@ -87,6 +92,7 @@ app.include_router(spectacles_router, prefix="/api/spectacles", tags=["Spectacle
 app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
 app.include_router(workflows_router)
 app.include_router(gate_router)  # Gate state management
+app.include_router(task_catalog_router)  # Task catalog management
 app.include_router(system_router)
 app.include_router(admin_router)
 app.include_router(external_router)  # External conversation logging

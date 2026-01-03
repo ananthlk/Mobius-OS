@@ -1,0 +1,284 @@
+{
+  "schema_name": "task_master_defaults",
+  "schema_version": "v1.0",
+
+  "classification": {
+    "domain": {
+      "allowed": [
+        "eligibility",
+        "billing",
+        "prior_auth",
+        "scheduling",
+        "intake",
+        "enrollment",
+        "claims",
+        "care_management",
+        "communications",
+        "admin",
+        "other"
+      ],
+      "default": "other"
+    },
+    "category": {
+      "allowed": [
+        "collect",
+        "verify",
+        "interpret",
+        "notify",
+        "escalate",
+        "decide",
+        "wait",
+        "manual"
+      ],
+      "default": "manual"
+    },
+    "intent_examples": [
+      "collect_information",
+      "verify_eligibility",
+      "interpret_response",
+      "notify_user",
+      "notify_patient",
+      "escalate_issue",
+      "make_decision",
+      "wait_for_response",
+      "manual_review"
+    ]
+  },
+
+  "automation": {
+    "default_mode": {
+      "allowed": ["agent", "copilot", "human_led"],
+      "default": "copilot"
+    },
+    "agentic_allowed": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "requires_human_decision": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "requires_human_action": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "risk_level": {
+      "allowed": ["low", "medium", "high"],
+      "default": "medium"
+    },
+    "confidence_threshold": {
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.9
+    }
+  },
+
+  "tool_binding_defaults": {
+    "candidate_tool_keys": {
+      "allowed": "array[string]",
+      "default": []
+    },
+    "tool_required": {
+      "allowed": [true, false],
+      "default": false
+    }
+  },
+
+  "information": {
+    "required_fields": {
+      "allowed": "array[string]",
+      "default": []
+    },
+    "optional_fields": {
+      "allowed": "array[string]",
+      "default": []
+    },
+    "likely_sources": {
+      "allowed": [
+        "patient",
+        "emr",
+        "billing",
+        "payer_portal",
+        "hie",
+        "user",
+        "unknown"
+      ],
+      "default": "unknown"
+    },
+    "confidence_user_has_fields": {
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5
+    },
+    "can_request_from_patient": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "sensitivity": {
+      "phi_level": {
+        "allowed": ["none", "low", "high"],
+        "default": "none"
+      },
+      "pii_level": {
+        "allowed": ["none", "low", "high"],
+        "default": "none"
+      }
+    }
+  },
+
+  "policy": {
+    "permissions_required": {
+      "allowed": [
+        "patient_contact",
+        "data_use",
+        "external_disclosure",
+        "billing_action",
+        "clinical_action",
+        "other"
+      ],
+      "default": []
+    },
+    "legal_template_required": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "approval_required": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "allowed_channels": {
+      "allowed": ["email", "sms", "phone", "portal", "none"],
+      "default": ["none"]
+    }
+  },
+
+  "temporal": {
+    "expected_latency": {
+      "allowed": ["instant", "minutes", "hours", "days"],
+      "default": "minutes"
+    },
+    "async_capable": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "blocking_by_default": {
+      "allowed": [true, false],
+      "default": true
+    },
+    "deadline_sensitive": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "max_wait_time_hours": {
+      "min": 0,
+      "max": 168,
+      "default": 0
+    }
+  },
+
+  "escalation": {
+    "escalate_on": {
+      "allowed": [
+        "timeout",
+        "tool_failure",
+        "missing_info",
+        "permission_denied",
+        "validation_error",
+        "other"
+      ],
+      "default": []
+    },
+    "default_notify_frequency": {
+      "allowed": ["immediate", "on_blocker", "on_completion", "never"],
+      "default": "on_blocker"
+    },
+    "noise_budget": {
+      "max_notifications_per_day": {
+        "min": 0,
+        "max": 10,
+        "default": 3
+      },
+      "batching_allowed": {
+        "allowed": [true, false],
+        "default": true
+      }
+    }
+  },
+
+  "dependencies": {
+    "depends_on_task_keys": {
+      "allowed": "array[string]",
+      "default": []
+    },
+    "blocks_task_keys": {
+      "allowed": "array[string]",
+      "default": []
+    }
+  },
+
+  "failure": {
+    "retry_allowed": {
+      "allowed": [true, false],
+      "default": true
+    },
+    "retry_limit": {
+      "min": 0,
+      "max": 5,
+      "default": 2
+    },
+    "retry_backoff": {
+      "allowed": ["none", "linear", "exponential"],
+      "default": "exponential"
+    },
+    "manual_override_allowed": {
+      "allowed": [true, false],
+      "default": true
+    }
+  },
+
+  "ui": {
+    "needs_user_input_by_default": {
+      "allowed": [true, false],
+      "default": false
+    },
+    "input_type": {
+      "allowed": ["choice", "text", "approval", "none"],
+      "default": "none"
+    },
+    "question_intent_examples": [
+      "involvement_preference",
+      "permission_approval",
+      "missing_information",
+      "escalation_contact",
+      "confirmation"
+    ]
+  },
+
+  "governance": {
+    "status": {
+      "allowed": ["draft", "active", "deprecated"],
+      "default": "draft"
+    },
+    "version": {
+      "min": 1,
+      "default": 1
+    },
+    "schema_version": {
+      "allowed": ["task_master_v1"],
+      "default": "task_master_v1"
+    }
+  },
+
+  "audit": {
+    "operation_action": {
+      "allowed": ["create", "update", "delete", "read", "list"]
+    },
+    "actor_type": {
+      "allowed": ["user", "system", "agent"]
+    },
+    "result_status": {
+      "allowed": ["ok", "error"]
+    }
+  }
+}
+

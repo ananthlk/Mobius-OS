@@ -62,7 +62,8 @@ What would you like to do next?"""
             session_id=session_id,
             context={
                 "operation": "planning_phase_announcement",
-                "source": "planning_phase_brain"
+                "source": "planning_phase_brain",
+                "system_generated": True
             }
         )
         
@@ -198,7 +199,8 @@ What would you like to do next?"""
                     session_id=session_id,
                     context={
                         "operation": "planning_phase_chat",
-                        "source": "planning_phase_brain"
+                        "source": "planning_phase_brain",
+                        "system_generated": True
                     }
                 )
                 
@@ -208,22 +210,57 @@ What would you like to do next?"""
         from nexus.conductors.workflows.orchestrator import orchestrator
         
         if decision == "create_new" or decision == "build_new":  # Support both for backward compatibility
-            # STUB: Acknowledge all messages from planning brain
-            response = f"[Planning Phase Brain] I received your message: '{message}'. This is a stub acknowledgment to confirm messages are reaching the planning phase brain correctly. Full message handling will be implemented next."
-            
-            await orchestrator._format_emit_and_persist(
-                agent=agent,
-                raw_content=response,
-                user_id=user_id,
-                session_id=session_id,
-                context={
-                    "operation": "planning_phase_chat",
-                    "source": "planning_phase_brain",
-                    "stub": True
+            # Guide plan to implementable state
+            try:
+                guidance_result = await self.guide_plan_to_implementable(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message=message if message else None
+                )
+                
+                # Format response through conversational agent
+                if guidance_result["conversation_state"] == "complete":
+                    response = "Your workflow plan is now fully implementable. All steps have owners, execution modes, and failure handling defined."
+                elif guidance_result["next_question"]:
+                    response = guidance_result["next_question"]
+                else:
+                    response = "Let me analyze your plan to ensure it's implementable..."
+                
+                await orchestrator._format_emit_and_persist(
+                    agent=agent,
+                    raw_content=response,
+                    user_id=user_id,
+                    session_id=session_id,
+                    context={
+                        "operation": "plan_implementation_guidance",
+                        "source": "planning_phase_brain",
+                        "implementation_status": guidance_result["implementation_status"],
+                        "system_generated": True
+                    }
+                )
+                
+                return {
+                    "status": guidance_result["conversation_state"],
+                    "message": response,
+                    "plan_updates": guidance_result["plan_updates"]
                 }
-            )
-            
-            return {"status": "acknowledged", "message": response}
+            except Exception as e:
+                logger.error(f"[PlanningPhaseBrain.handle_message] Guidance failed: {e}", exc_info=True)
+                # Fallback response
+                response = f"I'm analyzing your plan. Let me work through the implementation details."
+                await orchestrator._format_emit_and_persist(
+                    agent=agent,
+                    raw_content=response,
+                    user_id=user_id,
+                    session_id=session_id,
+                    context={
+                        "operation": "plan_implementation_guidance",
+                        "source": "planning_phase_brain",
+                        "error": str(e),
+                        "system_generated": True
+                    }
+                )
+                return {"status": "error", "message": response}
         
         # Handle other decisions (execute_existing, guide_me, refine_answers)
         elif decision in ["execute_existing", "guide_me", "refine_answers"]:
@@ -239,7 +276,8 @@ What would you like to do next?"""
                     "operation": "planning_phase_chat",
                     "source": "planning_phase_brain",
                     "stub": True,
-                    "decision": decision
+                    "decision": decision,
+                    "system_generated": True
                 }
             )
             
@@ -255,7 +293,8 @@ What would you like to do next?"""
             context={
                 "operation": "planning_phase_chat",
                 "source": "planning_phase_brain",
-                "stub": True
+                "stub": True,
+                "system_generated": True
             }
         )
         
@@ -287,15 +326,56 @@ What would you like to do next?"""
         session = await self._get_session(session_id)
         user_id = session.get("user_id", "user_123") if session else "user_123"
         
+        # Import orchestrator for formatting responses
+        from nexus.conductors.workflows.orchestrator import orchestrator
+        
         # Define decision handler callback
         async def on_decision(button_id: str, decision_value: str) -> Dict[str, Any]:
             """Handle decision-specific logic."""
             if decision_value == "create_new":
-                return {
-                    "status": "success",
-                    "message": "Great! Let's create a new workflow from scratch. I'll analyze your requirements and build a plan.",
-                    "next_step": "compute_plan"
-                }
+                # Trigger plan implementation guidance immediately after decision
+                try:
+                    guidance_result = await self.guide_plan_to_implementable(
+                        session_id=session_id,
+                        user_id=user_id,
+                        user_message=None  # Initial assessment
+                    )
+                    
+                    # Format response through conversational agent
+                    if guidance_result["conversation_state"] == "complete":
+                        response = "Your workflow plan is now fully implementable. All steps have owners, execution modes, and failure handling defined."
+                    elif guidance_result["next_question"]:
+                        response = guidance_result["next_question"]
+                    else:
+                        response = "Let me analyze your plan to ensure it's implementable..."
+                    
+                    # Emit the response message
+                    await orchestrator._format_emit_and_persist(
+                        agent=agent,
+                        raw_content=response,
+                        user_id=user_id,
+                        session_id=session_id,
+                        context={
+                            "operation": "plan_implementation_guidance",
+                            "source": "planning_phase_brain",
+                            "system_generated": True
+                        }
+                    )
+                    
+                    return {
+                        "status": "success",
+                        "message": response,
+                        "next_step": "plan_refinement",
+                        "implementation_status": guidance_result["implementation_status"]
+                    }
+                except Exception as e:
+                    logger.error(f"[PlanningPhaseBrain.handle_build_reuse_decision] Guidance failed: {e}", exc_info=True)
+                    # Fallback message
+                    return {
+                        "status": "success",
+                        "message": "Great! Let's create a new workflow from scratch. I'll analyze your requirements and build a plan.",
+                        "next_step": "compute_plan"
+                    }
             elif decision_value == "execute_existing":
                 return {
                     "status": "not_implemented",
@@ -354,7 +434,8 @@ What would you like to do next?"""
             context={
                 "operation": "planning_phase_decision_response",
                 "source": "planning_phase_brain",
-                "choice": choice
+                "choice": choice,
+                "button_generated": True
             }
         )
         
@@ -921,6 +1002,431 @@ What would you like to do next?"""
             await database.execute(query, {"session_id": session_id})
         except Exception as e:
             self.mem.debug(f"Could not reset planning phase (columns may not exist): {e}")
+    
+    # ============================================================================
+    # Plan Implementation Guidance (LLM-Guided)
+    # ============================================================================
+    
+    async def guide_plan_to_implementable(
+        self,
+        session_id: int,
+        user_id: str,
+        user_message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        LLM-guided conversation to make plan implementable.
+        Uses prompt from prompt_manager database.
+        Loads full plan, tool contracts, and guides user through:
+        - Step ownership (tool vs user)
+        - Data availability for tool steps
+        - Execution mode per step (agent/copilot/human-driven)
+        - Escalation/failure logic
+        - Patient communication permissions
+        
+        Returns:
+            {
+                "plan_updates": Dict,  # Updated plan structure
+                "conversation_state": str,  # "needs_input"|"complete"|"clarification"
+                "next_question": Optional[str],  # Question for user if needed
+                "implementation_status": Dict  # What's complete, what's missing
+            }
+        """
+        logger.debug(f"[PlanningPhaseBrain.guide_plan_to_implementable] ENTRY | session_id={session_id}")
+        
+        # 1. Load full plan
+        session = await self._get_session(session_id)
+        draft_plan = session.get("draft_plan")
+        if isinstance(draft_plan, str):
+            draft_plan = json.loads(draft_plan) if draft_plan else {}
+        
+        if not draft_plan:
+            raise ValueError("No draft plan found")
+        
+        # 2. Load all available tools with their contracts
+        from nexus.brains.planner import planner_brain
+        available_tools = await planner_brain._get_available_tools()
+        
+        tool_contracts = []
+        for tool in available_tools:
+            schema = tool.define_schema()
+            tool_contracts.append({
+                "name": schema.name,
+                "description": schema.description,
+                "parameters": schema.parameters,
+                "required_parameters": list(schema.parameters.keys()) if schema.parameters else []
+            })
+        
+        # 3. Get gate state for problem context
+        gate_state = await self._load_gate_state(session_id)
+        problem_statement = gate_state.summary if gate_state else ""
+        gate_values = {}
+        if gate_state:
+            for gate_key, gate_value in gate_state.gates.items():
+                gate_values[gate_key] = {
+                    "classified": gate_value.classified,
+                    "raw": gate_value.raw
+                }
+        
+        # 4. Analyze current implementation status
+        implementation_status = self._analyze_implementation_status(draft_plan, tool_contracts, gate_values)
+        
+        # 5. Get prompt from prompt_manager
+        from nexus.modules.prompt_manager import prompt_manager
+        from nexus.core.prompt_builder import PromptBuilder
+        from nexus.modules.config_manager import config_manager
+        from nexus.modules.llm_service import llm_service
+        
+        # Detect domain (default to eligibility)
+        domain = "eligibility"  # Could detect from session or gate state
+        strategy = session.get("consultant_strategy", "TABULA_RASA")
+        
+        prompt_data = await prompt_manager.get_prompt(
+            module_name="workflow",
+            domain=domain,
+            mode=strategy,
+            step="plan_implementation",
+            session_id=session_id
+        )
+        
+        if not prompt_data:
+            logger.warning(f"[PlanningPhaseBrain.guide_plan_to_implementable] Prompt not found, using fallback")
+            # Fallback: use hardcoded prompt structure
+            return await self._guide_plan_fallback(session_id, user_id, draft_plan, tool_contracts, gate_values, implementation_status, user_message)
+        
+        # 6. Build prompt with variables using PromptBuilder
+        pb = PromptBuilder()
+        pb.build_from_config(prompt_data["config"], context={
+            "draft_plan": draft_plan,
+            "tool_contracts": tool_contracts,
+            "problem_statement": problem_statement,
+            "gate_values": gate_values,
+            "implementation_status": implementation_status,
+            "user_message": user_message,
+            "transcript": session.get("transcript", [])[-10:] if session else []
+        })
+        
+        # Add dynamic context sections
+        pb.add_context("DRAFT_PLAN", json.dumps(draft_plan, indent=2))
+        pb.add_context("AVAILABLE_TOOLS", json.dumps(tool_contracts, indent=2))
+        pb.add_context("PROBLEM_STATEMENT", problem_statement)
+        pb.add_context("GATE_VALUES", json.dumps(gate_values, indent=2))
+        pb.add_context("IMPLEMENTATION_STATUS", json.dumps(implementation_status, indent=2))
+        
+        if user_message:
+            pb.add_context("USER_MESSAGE", user_message)
+        
+        # Build final prompt
+        system_prompt = pb.build()
+        
+        # Add debug logging to see what was built
+        logger.debug(f"[PlanningPhaseBrain.guide_plan_to_implementable] System prompt length: {len(system_prompt)} chars")
+        logger.debug(f"[PlanningPhaseBrain.guide_plan_to_implementable] System prompt preview (first 500 chars):\n{system_prompt[:500]}")
+        if len(system_prompt) > 500:
+            logger.debug(f"[PlanningPhaseBrain.guide_plan_to_implementable] System prompt preview (last 500 chars):\n{system_prompt[-500:]}")
+        
+        # User query for this iteration
+        user_query = user_message if user_message else "Analyze the plan and guide me to make it implementable."
+        
+        # Log the actual full prompt that will be sent
+        full_prompt_to_send = f"{system_prompt}\n\n{user_query}" if system_prompt else user_query
+        logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] 📤 FULL PROMPT BEING SENT ({len(full_prompt_to_send)} chars):")
+        logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {'='*80}")
+        logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {full_prompt_to_send}")
+        logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {'='*80}")
+        
+        # 7. Make LLM call
+        model_context = await config_manager.resolve_app_context("workflow", user_id)
+        agent = BaseAgent(session_id=session_id)
+        await agent.emit("THINKING", {"message": "Analyzing plan implementation requirements..."})
+        
+        try:
+            llm_response = await llm_service.generate_text(
+                prompt=user_query,
+                system_instruction=system_prompt,
+                model_context=model_context,
+                generation_config=prompt_data.get("generation_config", {}),
+                return_metadata=False
+            )
+            
+            # Log the actual response received
+            logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] 📥 FULL RESPONSE RECEIVED ({len(llm_response)} chars):")
+            logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {'='*80}")
+            logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {llm_response}")
+            logger.info(f"[PlanningPhaseBrain.guide_plan_to_implementable] {'='*80}")
+            
+            # Check if response is empty
+            if not llm_response or not llm_response.strip():
+                logger.error(f"[PlanningPhaseBrain.guide_plan_to_implementable] ❌ LLM returned empty response")
+                raise ValueError("LLM returned empty response. Please try again.")
+            
+            # 8. Parse structured response
+            planning_result = self._parse_planning_response(llm_response)
+            
+            # 9. Apply updates to plan
+            updated_plan = await self._apply_implementation_updates(
+                draft_plan=draft_plan,
+                updates=planning_result.get("plan_updates", {}),
+                tool_contracts=tool_contracts
+            )
+            
+            # 10. Save updated plan
+            await self._save_draft_plan(session_id, updated_plan)
+            
+            return {
+                "plan_updates": updated_plan,
+                "conversation_state": planning_result.get("conversation_state", "needs_input"),
+                "next_question": planning_result.get("next_question"),
+                "implementation_status": self._analyze_implementation_status(updated_plan, tool_contracts, gate_values),
+                "raw_llm_response": planning_result
+            }
+            
+        except Exception as e:
+            logger.error(f"[PlanningPhaseBrain.guide_plan_to_implementable] Failed: {e}", exc_info=True)
+            raise
+    
+    async def _guide_plan_fallback(
+        self,
+        session_id: int,
+        user_id: str,
+        draft_plan: Dict[str, Any],
+        tool_contracts: List[Dict[str, Any]],
+        gate_values: Dict[str, Any],
+        implementation_status: Dict[str, Any],
+        user_message: Optional[str]
+    ) -> Dict[str, Any]:
+        """Fallback implementation if prompt not found."""
+        logger.debug(f"[PlanningPhaseBrain._guide_plan_fallback] Using fallback implementation")
+        
+        # Simple fallback: return current status
+        return {
+            "plan_updates": draft_plan,
+            "conversation_state": "needs_input",
+            "next_question": "Let me analyze your plan. What would you like to refine?",
+            "implementation_status": implementation_status,
+            "raw_llm_response": {}
+        }
+    
+    def _analyze_implementation_status(
+        self,
+        draft_plan: Dict[str, Any],
+        tool_contracts: List[Dict[str, Any]],
+        gate_values: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze what's complete and what's missing for implementation."""
+        
+        gates = draft_plan.get("gates", [])
+        status = {
+            "steps_total": 0,
+            "steps_with_owner": 0,
+            "steps_with_tool": 0,
+            "steps_with_execution_mode": 0,
+            "steps_with_failure_logic": 0,
+            "steps_with_patient_comm": 0,
+            "missing_data": [],
+            "incomplete_steps": []
+        }
+        
+        for gate in gates:
+            for step in gate.get("steps", []):
+                status["steps_total"] += 1
+                step_id = step.get("id", "unknown")
+                
+                # Check owner
+                if step.get("owner") in ["tool", "user"]:
+                    status["steps_with_owner"] += 1
+                else:
+                    status["incomplete_steps"].append({
+                        "step_id": step_id,
+                        "missing": "owner"
+                    })
+                
+                # Check tool assignment
+                if step.get("tool_name"):
+                    status["steps_with_tool"] += 1
+                    # Check if tool parameters are available
+                    tool_name = step.get("tool_name")
+                    tool_contract = next((t for t in tool_contracts if t["name"] == tool_name), None)
+                    if tool_contract:
+                        required_params = tool_contract.get("required_parameters", [])
+                        provided_params = step.get("tool_parameters", {})
+                        missing = [p for p in required_params if p not in provided_params]
+                        if missing:
+                            status["missing_data"].append({
+                                "step_id": step_id,
+                                "tool": tool_name,
+                                "missing_parameters": missing
+                            })
+                
+                # Check execution mode
+                if step.get("execution_mode") in ["agent", "copilot", "human_driven"]:
+                    status["steps_with_execution_mode"] += 1
+                else:
+                    if step_id not in [s["step_id"] for s in status["incomplete_steps"]]:
+                        status["incomplete_steps"].append({
+                            "step_id": step_id,
+                            "missing": "execution_mode"
+                        })
+                
+                # Check failure logic
+                if step.get("failure_logic"):
+                    status["steps_with_failure_logic"] += 1
+                
+                # Check patient communication
+                if step.get("patient_communication", {}).get("involves_patient"):
+                    if step.get("patient_communication", {}).get("method"):
+                        status["steps_with_patient_comm"] += 1
+        
+        status["completion_percentage"] = (
+            (status["steps_with_owner"] + 
+             status["steps_with_execution_mode"] + 
+             status["steps_with_failure_logic"]) / 
+            (status["steps_total"] * 3) * 100
+        ) if status["steps_total"] > 0 else 0
+        
+        return status
+    
+    def _parse_planning_response(self, llm_response: str) -> Dict[str, Any]:
+        """Parse LLM JSON response - handles markdown code blocks and extra text."""
+        import re
+        from typing import Optional
+        
+        logger.info(f"[PlanningPhaseBrain._parse_planning_response] 📥 Parsing LLM response ({len(llm_response)} chars)")
+        logger.debug(f"[PlanningPhaseBrain._parse_planning_response] Full response:\n{llm_response}")
+        
+        # Helper function: Extract JSON using brace counting (robust for nested JSON)
+        def extract_json_with_brace_counting(text: str) -> Optional[str]:
+            """Extract JSON object from text using brace counting."""
+            start_idx = text.find('{')
+            if start_idx == -1:
+                return None
+            
+            brace_count = 0
+            for i in range(start_idx, len(text)):
+                if text[i] == '{':
+                    brace_count += 1
+                elif text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        return text[start_idx:i+1]
+            return None
+        
+        # Step 1: Try to extract JSON from markdown code blocks first
+        code_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+        code_block_match = re.search(code_block_pattern, llm_response, re.DOTALL)
+        if code_block_match:
+            code_block_content = code_block_match.group(1).strip()
+            logger.debug(f"[PlanningPhaseBrain._parse_planning_response] Found JSON in code block, trying to parse...")
+            
+            # Try direct parsing first
+            try:
+                parsed = json.loads(code_block_content)
+                logger.info(f"[PlanningPhaseBrain._parse_planning_response] ✅ Successfully parsed JSON from code block")
+                return parsed
+            except json.JSONDecodeError:
+                # If direct parsing fails, try brace counting on the code block content
+                logger.debug(f"[PlanningPhaseBrain._parse_planning_response] Direct parse failed, trying brace counting on code block content...")
+                json_candidate = extract_json_with_brace_counting(code_block_content)
+                if json_candidate:
+                    try:
+                        parsed = json.loads(json_candidate)
+                        logger.info(f"[PlanningPhaseBrain._parse_planning_response] ✅ Successfully parsed JSON from code block using brace counting")
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[PlanningPhaseBrain._parse_planning_response] Brace counting on code block failed: {e}")
+        
+        # Step 2: Try to find JSON using brace counting (removed broken regex pattern)
+        json_candidate = extract_json_with_brace_counting(llm_response)
+        if json_candidate:
+            try:
+                parsed = json.loads(json_candidate)
+                logger.info(f"[PlanningPhaseBrain._parse_planning_response] ✅ Successfully parsed JSON using brace counting")
+                return parsed
+            except json.JSONDecodeError as e:
+                logger.warning(f"[PlanningPhaseBrain._parse_planning_response] Brace counting found candidate but parsing failed: {e}")
+        
+        # Step 3: Try parsing entire response as JSON (last resort)
+        try:
+            parsed = json.loads(llm_response.strip())
+            logger.info(f"[PlanningPhaseBrain._parse_planning_response] ✅ Successfully parsed entire response as JSON")
+            return parsed
+        except json.JSONDecodeError as e:
+            logger.error(f"[PlanningPhaseBrain._parse_planning_response] ❌ All parsing attempts failed. Last error: {e}")
+            logger.error(f"[PlanningPhaseBrain._parse_planning_response] Response that failed to parse:\n{llm_response}")
+            
+            # Return default structure
+            return {
+                "conversation_state": "clarification",
+                "next_question": "I had trouble parsing the response. Please try again.",
+                "plan_updates": {"steps": []},
+                "missing_information": [],
+                "reasoning": f"Failed to parse LLM response: {str(e)}"
+            }
+    
+    async def _apply_implementation_updates(
+        self,
+        draft_plan: Dict[str, Any],
+        updates: Dict[str, Any],
+        tool_contracts: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Apply LLM-suggested updates to the plan."""
+        
+        step_updates = updates.get("steps", [])
+        
+        # Create lookup for step updates
+        updates_by_step_id = {u["step_id"]: u for u in step_updates}
+        
+        # Apply updates to each step
+        gates = draft_plan.get("gates", [])
+        for gate in gates:
+            for step in gate.get("steps", []):
+                step_id = step.get("id")
+                if step_id in updates_by_step_id:
+                    update = updates_by_step_id[step_id]
+                    
+                    # Apply owner
+                    if "owner" in update:
+                        step["owner"] = update["owner"]
+                    
+                    # Apply tool assignment
+                    if "tool_name" in update:
+                        step["tool_name"] = update["tool_name"]
+                    if "tool_parameters" in update:
+                        step["tool_parameters"] = update["tool_parameters"]
+                    
+                    # Apply execution mode
+                    if "execution_mode" in update:
+                        step["execution_mode"] = update["execution_mode"]
+                    
+                    # Apply required data
+                    if "required_data" in update:
+                        step["required_data"] = update["required_data"]
+                    if "data_sources" in update:
+                        step["data_sources"] = update["data_sources"]
+                    
+                    # Apply failure logic
+                    if "failure_logic" in update:
+                        step["failure_logic"] = update["failure_logic"]
+                    
+                    # Apply patient communication
+                    if "patient_communication" in update:
+                        step["patient_communication"] = update["patient_communication"]
+        
+        draft_plan["gates"] = gates
+        return draft_plan
+    
+    async def _save_draft_plan(self, session_id: int, draft_plan: Dict[str, Any]) -> None:
+        """Save updated draft plan to database."""
+        await database.execute(
+            "UPDATE shaping_sessions SET draft_plan = :plan, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+            {"plan": json.dumps(draft_plan), "id": session_id}
+        )
+        
+        # Emit artifact for frontend
+        agent = BaseAgent(session_id=session_id)
+        await agent.emit("ARTIFACTS", {
+            "type": "DRAFT_PLAN",
+            "data": draft_plan
+        })
 
 
 # Singleton instance

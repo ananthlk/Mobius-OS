@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from nexus.core.memory_logger import MemoryLogger
 from nexus.core.gate_models import GateState, GateConfig
 from nexus.core.base_tool import NexusTool
@@ -342,8 +342,21 @@ class PlannerBrain:
                     # Add steps from pruned phase (already filtered by sub_level selection)
                     if matching_phase:
                         for i, step in enumerate(matching_phase.steps, start=1):
+                            # Ensure task exists in catalog before adding to draft_plan
+                            task_ref = await self._ensure_task_in_catalog(
+                                step.description,
+                                context={
+                                    "domain": context.get("domain", "eligibility"),
+                                    "strategy": context.get("strategy", "TABULA_RASA"),
+                                    "gate_key": gate_key,
+                                    "user_id": context.get("user_id")
+                                }
+                            )
+                            
                             step_dict = {
                                 "id": f"step_{gate_num}.{i}",  # Hierarchical: step_1.1, step_1.2, step_2.1, etc.
+                                "task_id": task_ref["task_id"],  # UUID - primary reference for integrity
+                                "task_key": task_ref["task_key"],  # Optional: keep for human readability
                                 "description": step.description,
                                 "tool_hint": step.tool_hint or None
                             }
@@ -351,9 +364,22 @@ class PlannerBrain:
                     else:
                         # If no matching phase (gate not answered or no template), create placeholder
                         if gate_value.classified:
+                            step_description = f"Extract gate requirement: {gate_value.classified or gate_value.raw or 'Pending'}"
+                            task_ref = await self._ensure_task_in_catalog(
+                                step_description,
+                                context={
+                                    "domain": context.get("domain", "eligibility"),
+                                    "strategy": context.get("strategy", "TABULA_RASA"),
+                                    "gate_key": gate_key,
+                                    "user_id": context.get("user_id")
+                                }
+                            )
+                            
                             gate_dict["steps"].append({
                                 "id": f"step_{gate_num}.1",
-                                "description": f"Extract gate requirement: {gate_value.classified or gate_value.raw or 'Pending'}",
+                                "task_id": task_ref["task_id"],  # UUID - primary reference for integrity
+                                "task_key": task_ref["task_key"],  # Optional: keep for human readability
+                                "description": step_description,
                                 "gate_data": {
                                     "raw": gate_value.raw,
                                     "classified": gate_value.classified,
@@ -378,8 +404,20 @@ class PlannerBrain:
                     
                     # Convert steps with hierarchical numbering
                     for j, step in enumerate(phase.steps, start=1):
+                        # Ensure task exists in catalog before adding to draft_plan
+                        task_ref = await self._ensure_task_in_catalog(
+                            step.description,
+                            context={
+                                "domain": context.get("domain", "eligibility"),
+                                "strategy": context.get("strategy", "TABULA_RASA"),
+                                "user_id": context.get("user_id")
+                            }
+                        )
+                        
                         step_dict = {
                             "id": f"step_{i}.{j}",  # Hierarchical: step_1.1, step_1.2, etc.
+                            "task_id": task_ref["task_id"],  # UUID - primary reference for integrity
+                            "task_key": task_ref["task_key"],  # Optional: keep for human readability
                             "description": step.description,
                             "tool_hint": step.tool_hint or None
                         }
@@ -395,6 +433,11 @@ class PlannerBrain:
                     if "steps" in gate and isinstance(gate["steps"], list):
                         for step in gate["steps"]:
                             await self._process_step(step, available_tools)
+            
+            # 4. Validate all tasks in draft_plan exist in catalog
+            validation_result = await self._validate_draft_plan_tasks(draft_plan)
+            if not validation_result[0]:
+                self.mem.log_thinking(f"[PLANNER] Warning: Some tasks in draft_plan not found in catalog: {validation_result[1]}")
             
             # Emit journey state update after draft is created
             if session_id:
@@ -417,6 +460,64 @@ class PlannerBrain:
                 "goal": "",
                 "gates": []  # Changed from "phases" to "gates"
             }
+    
+    async def _ensure_task_in_catalog(self, step_description: str, context: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Ensure task exists in catalog before adding to draft_plan.
+        This is the enforcement point - tasks MUST exist in catalog.
+        
+        Uses find_or_create_task() to find existing task or create new one.
+        
+        Args:
+            step_description: Description of the step/task
+            context: Context (domain, strategy, etc.)
+        
+        Returns:
+            Dict with 'task_id' (UUID) and 'task_key' (string) for the task
+        """
+        from nexus.modules.task_registry import task_registry
+        
+        try:
+            # Find existing task or create new one - now returns full task dict
+            task = await task_registry.find_or_create_task(
+                task_description=step_description,
+                context=context,
+                created_by=context.get("user_id", "system")
+            )
+            task_ref = {
+                "task_id": task["task_id"],  # UUID - primary reference for integrity
+                "task_key": task["task_key"]  # Keep for human readability
+            }
+            self.mem.log_thinking(f"[PLANNER] Ensured task '{task_ref['task_key']}' (ID: {task_ref['task_id']}) exists in catalog for step: {step_description[:50]}...")
+            return task_ref
+        except Exception as e:
+            self.mem.error(f"[PLANNER] Failed to ensure task in catalog: {e}")
+            raise  # Don't fallback - fail explicitly to maintain integrity
+    
+    async def _validate_draft_plan_tasks(self, draft_plan: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """
+        Validate all tasks in draft_plan exist in catalog.
+        
+        Args:
+            draft_plan: Draft plan dictionary
+        
+        Returns:
+            Tuple of (is_valid, list_of_missing_task_keys)
+        """
+        from nexus.modules.task_registry import task_registry
+        
+        missing_tasks = []
+        
+        if "gates" in draft_plan:
+            for gate in draft_plan.get("gates", []):
+                for step in gate.get("steps", []):
+                    task_key = step.get("task_key")
+                    if task_key:
+                        exists = await task_registry.validate_task_exists(task_key)
+                        if not exists:
+                            missing_tasks.append(task_key)
+        
+        return (len(missing_tasks) == 0, missing_tasks)
     
     def map_gate_state_to_living_document(
         self,

@@ -484,8 +484,8 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                 </span>
             </div>
 
-            {/* Chat Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6" ref={scrollRef}>
+            {/* Chat Area - Match chat page padding */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-10 space-y-8" ref={scrollRef}>
                 {messages.map((msg) => {
                     // Render thinking containers separately
                     if (msg.role === "thinking") {
@@ -556,23 +556,20 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                         );
                     }
 
-                    // Render user/system messages
+                    // Render user/system messages - Match chat page styling
                     return (
-                    <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "system" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-600"}`}>
-                            {msg.role === "system" ? <Bot size={16} /> : <User size={16} />}
+                    <div key={msg.id} className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[80%] md:max-w-[70%] rounded-[20px] px-6 py-4 text-[15px] leading-relaxed shadow-sm break-words overflow-wrap-anywhere ${msg.role === "user"
+                            ? 'bg-[#E8F0FE] text-[#1f1f1f] rounded-tr-none' // User: Light Blue (Google User style)
+                            : 'bg-white border border-gray-100 text-[#1f1f1f] rounded-tl-none' // Assistant: White
+                            }`}>
+                            {/* Render Markdown-lite (bolding) */}
+                            {msg.content && (
+                                <div className="break-words overflow-wrap-anywhere" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
+                            )}
                         </div>
-                            <div className={`max-w-[80%] rounded-2xl overflow-hidden ${msg.role === "system" ? "bg-blue-50 rounded-tl-none" : "bg-gray-100 rounded-tr-none"}`}>
-                                {/* Message content container with max height and scroll */}
-                                <div className={`max-h-[400px] overflow-y-auto p-3 text-sm leading-relaxed text-[#1A1A1A] custom-scrollbar break-words ${msg.role === "system" ? "" : ""}`}>
-                            {/* Render Markdown-lite (bolding) if needed, for now raw text */}
-                                    {msg.content && (
-                            <div className="break-words overflow-wrap-anywhere" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
-                                    )}
-                        </div>
-                            </div>
-                        </div>
-                            );
+                    </div>
+                    );
                         })}
                         
                         {/* Render action buttons after messages */}
@@ -587,9 +584,9 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                         )}
                     </div>
 
-            {/* Input Area */}
-            <div className="p-4 border-t-2 border-gray-300 bg-white">
-                <div className="relative">
+            {/* Input Area - Match chat page styling */}
+            <div className="p-4 md:p-6 border-t border-gray-100 bg-white">
+                <div className="bg-[#F0F4F8] rounded-full flex items-center px-2 py-2 focus-within:bg-white focus-within:shadow-md focus-within:ring-1 focus-within:ring-gray-200 transition-all">
                     <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -601,8 +598,8 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                         }}
                         placeholder="Clarify the problem..."
                         rows={1}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all pr-12 text-gray-800 placeholder-gray-400 resize-none overflow-hidden break-words"
-                        style={{ minHeight: '44px', maxHeight: '120px' }}
+                        className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-[#1f1f1f] placeholder-[#5F6368] resize-none overflow-hidden break-words pr-12"
+                        style={{ minHeight: '40px', maxHeight: '120px' }}
                         onInput={(e) => {
                             const target = e.target as HTMLTextAreaElement;
                             target.style.height = 'auto';
@@ -612,9 +609,9 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                     <button
                         onClick={handleSend}
                         disabled={!input.trim()}
-                        className="absolute right-2 top-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-10 h-10 flex items-center justify-center rounded-full text-[#1a73e8] hover:bg-blue-50 disabled:opacity-50 transition-colors"
                     >
-                        <Send size={16} />
+                        <Send size={20} />
                     </button>
                 </div>
             </div>

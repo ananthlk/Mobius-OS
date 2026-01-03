@@ -1,6 +1,6 @@
 import logging
 import json
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from nexus.conductors.workflows.orchestrator import orchestrator
@@ -55,6 +55,20 @@ async def list_tools():
     tools_schema.extend(hardcoded_schemas)
     
     return tools_schema
+
+@router.get("/trending-issues")
+async def get_trending_issues(
+    limit: int = Query(4, ge=1, le=10),
+    days: int = Query(7, ge=1, le=30)
+):
+    """
+    Get trending issues based on recent searches.
+    Returns top N semantically similar queries from last N days.
+    """
+    from nexus.modules.trending_issues import get_trending_issues
+    
+    trending = await get_trending_issues(limit=limit, days=days)
+    return {"trending_issues": trending}
 
 @router.get("/")
 async def list_recipes():
