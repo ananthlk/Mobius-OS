@@ -22,3 +22,4 @@ COMMENT ON COLUMN shaping_sessions.planning_phase_decision IS 'User decision: bu
 COMMENT ON COLUMN shaping_sessions.planning_phase_approved IS 'Whether the workflow plan has been approved';
 COMMENT ON COLUMN shaping_sessions.planning_phase_approved_at IS 'Timestamp when plan was approved';
 
+

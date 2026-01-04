@@ -147,6 +147,11 @@ class PromptBuilder:
         if "USER_PREFERENCES" in config:
             self.add_context("USER_PREFERENCES", config["USER_PREFERENCES"].get("instruction", ""))
         
+        # Add user role (if available in context)
+        if context and "user_role" in context:
+            user_role = context.get("user_role")
+            self.add_context("USER_ROLE", f"The user has role: {user_role}. Adjust your responses accordingly.")
+        
         # Add organization context (if available in context)
         if "ORGANIZATION_CONTEXT" in config:
             self.add_context("ORGANIZATION_CONTEXT", config["ORGANIZATION_CONTEXT"].get("instruction", ""))

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import MobiusIcon from "@/components/MobiusIcon";
+import BrandName from "@/components/BrandName";
+import { useEnsureUser } from "@/hooks/useEnsureUser";
 
 export default function DashboardLayout({
     children,
@@ -13,6 +15,8 @@ export default function DashboardLayout({
     children: React.ReactNode;
 }) {
     const { data: session } = useSession();
+    // Ensure user exists in backend database
+    useEnsureUser();
     const pathname = usePathname();
 
     const isActive = (path: string) => pathname?.startsWith(path);
@@ -44,17 +48,17 @@ export default function DashboardLayout({
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
     return (
-        <div className="flex h-screen bg-[#F8F9FA] font-sans text-[#202124]">
+        <div className="flex h-screen bg-[var(--bg-primary)] font-sans text-[var(--text-primary)]">
             {/* Sidebar (Navigation Rail) - Collapsible */}
             <aside
                 className={`
-                    bg-[#F0F4F8] p-4 flex flex-col hidden md:flex rounded-r-2xl m-2 ml-0 transition-all duration-300 ease-in-out border-r border-gray-100/50
+                    pattern-board-light p-4 flex flex-col hidden md:flex rounded-r-2xl m-2 ml-0 transition-all duration-300 ease-in-out border-r border-[var(--border-subtle)]
                     ${isSidebarOpen ? 'w-[280px] opacity-100 translate-x-0' : 'w-0 p-0 opacity-0 -translate-x-4 overflow-hidden border-none m-0'}
                 `}
             >
                 <div className="flex items-center gap-3 px-4 mb-8 mt-2 min-w-max">
                     <MobiusIcon size={32} />
-                    <span className="font-semibold text-xl text-[#5F6368]">Mobius</span>
+                    <BrandName size="lg" />
                 </div>
 
                 {/* Modules Section */}
@@ -114,7 +118,7 @@ export default function DashboardLayout({
             </aside>
 
             {/* Main Content Area */}
-            <main className="flex-1 flex flex-col relative bg-white m-2 rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all duration-300">
+            <main className="flex-1 flex flex-col relative bg-[var(--bg-primary)] m-2 rounded-2xl shadow-sm border border-[var(--border-subtle)] overflow-hidden transition-all duration-300">
                 {/* Toggle Button - Positioned on the left edge, always visible */}
                 <button
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}

@@ -11,13 +11,14 @@ logger = logging.getLogger("nexus.tool_seeding")
 TOOLS_TO_SEED = [
     # Gate 1: Patient/Insurance Info Availability
     {
-        "name": "patient_demographics_retriever",
-        "display_name": "Patient Demographics Retriever",
-        "description": "Retrieves patient demographics (name, DOB, address, contact info) from EHR/EMR system.",
+        "name": "emr_patient_demographics_retriever",
+        "display_name": "EMR Patient Demographics Retriever",
+        "description": "Retrieves patient demographics (name, DOB, address, contact info) from EMR system. Uses patient_id (EMR identifier).",
         "category": "data_retrieval",
         "version": "1.0.0",
+        "implementation_status": "REAL",  # REAL: Uses API endpoints (/api/user-profiles/{patient_id}/system)
         "schema_definition": {
-            "name": "patient_demographics_retriever",
+            "name": "emr_patient_demographics_retriever",
             "description": "Retrieves patient demographics (name, DOB, address, contact info) from EHR/EMR system.",
             "parameters": {
                 "patient_id": "str (Patient identifier)",
@@ -46,19 +47,20 @@ TOOLS_TO_SEED = [
         "is_deterministic": True,
         "is_stateless": True,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.PatientDemographicsRetriever",
+        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.EMRPatientDemographicsRetriever",
         "tags": ["eligibility", "demographics", "patient_data"],
         "author": "System",
         "status": "active"
     },
     {
-        "name": "insurance_info_retriever",
-        "display_name": "Insurance Info Retriever",
-        "description": "Retrieves insurance information from patient record (payer ID, member ID, group number, policy number).",
+        "name": "emr_patient_insurance_info_retriever",
+        "display_name": "EMR Patient Insurance Info Retriever",
+        "description": "Retrieves insurance information FROM patient record/EMR system (payer ID, member ID, group number, policy number). Uses patient_id (EMR identifier).",
         "category": "data_retrieval",
         "version": "1.0.0",
+        "implementation_status": "REAL",  # REAL: Uses API endpoints (/api/user-profiles/{patient_id}/health-plan) to get insurance info FROM patient record
         "schema_definition": {
-            "name": "insurance_info_retriever",
+            "name": "emr_patient_insurance_info_retriever",
             "description": "Retrieves insurance information from patient record (payer ID, member ID, group number, policy number).",
             "parameters": {
                 "patient_id": "str (Patient identifier)"
@@ -79,19 +81,20 @@ TOOLS_TO_SEED = [
         "is_deterministic": True,
         "is_stateless": True,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.InsuranceInfoRetriever",
+        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.EMRPatientInsuranceInfoRetriever",
         "tags": ["eligibility", "insurance", "patient_data"],
         "author": "System",
         "status": "active"
     },
     {
-        "name": "historical_insurance_lookup",
-        "display_name": "Historical Insurance Lookup",
-        "description": "Searches historical records for past insurance information when current info is missing.",
+        "name": "emr_patient_historical_insurance_lookup",
+        "display_name": "EMR Patient Historical Insurance Lookup",
+        "description": "Searches historical insurance records from EMR system when current info is missing. Uses patient_id (EMR identifier).",
         "category": "data_retrieval",
         "version": "1.0.0",
+        "implementation_status": "PARTIAL",  # PARTIAL: Uses API but returns current coverage as historical (not true historical lookup)
         "schema_definition": {
-            "name": "historical_insurance_lookup",
+            "name": "emr_patient_historical_insurance_lookup",
             "description": "Searches historical records for past insurance information when current info is missing.",
             "parameters": {
                 "patient_id": "str (Patient identifier)",
@@ -122,7 +125,7 @@ TOOLS_TO_SEED = [
         "is_deterministic": True,
         "is_stateless": True,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.HistoricalInsuranceLookup",
+        "implementation_path": "nexus.tools.eligibility.gate1_data_retrieval.EMRPatientHistoricalInsuranceLookup",
         "tags": ["eligibility", "history", "lookback"],
         "author": "System",
         "status": "active"
@@ -133,6 +136,7 @@ TOOLS_TO_SEED = [
         "description": "Queries Health Information Exchange (HIE) for insurance data when local records are incomplete.",
         "category": "integration",
         "version": "1.0.0",
+        "implementation_status": "STUB",  # STUB: Mock implementation - returns hardcoded data, no real HIE integration
         "schema_definition": {
             "name": "hie_insurance_query",
             "description": "Queries Health Information Exchange (HIE) for insurance data when local records are incomplete.",
@@ -181,9 +185,10 @@ TOOLS_TO_SEED = [
     {
         "name": "patient_insurance_collector",
         "display_name": "Patient Insurance Collector",
-        "description": "Initiates patient communication to collect insurance information when it must come from patient directly.",
+        "description": "Initiates patient communication to collect insurance information when it must come from patient directly. Uses patient_id (EMR identifier).",
         "category": "communication",
         "version": "1.0.0",
+        "implementation_status": "STUB",  # STUB: Mock implementation - returns hardcoded data, no real communication integration
         "schema_definition": {
             "name": "patient_insurance_collector",
             "description": "Initiates patient communication to collect insurance information when it must come from patient directly.",
@@ -238,6 +243,7 @@ TOOLS_TO_SEED = [
         "description": "Verifies eligibility specifically for billing purposes (coverage, effective dates, copays).",
         "category": "eligibility",
         "version": "1.0.0",
+        "implementation_status": "STUB",  # STUB: Mock implementation, returns hardcoded data
         "schema_definition": {
             "name": "billing_eligibility_verifier",
             "description": "Verifies eligibility specifically for billing purposes (coverage, effective dates, copays).",
@@ -331,6 +337,7 @@ TOOLS_TO_SEED = [
         "description": "Checks eligibility for clinical decision support (coverage for specific services/treatments).",
         "category": "eligibility",
         "version": "1.0.0",
+        "implementation_status": "STUB",  # STUB: Mock implementation, returns hardcoded data
         "schema_definition": {
             "name": "clinical_eligibility_checker",
             "description": "Checks eligibility for clinical decision support (coverage for specific services/treatments).",
@@ -507,27 +514,27 @@ TOOLS_TO_SEED = [
     },
     # Communication Tools
     {
-        "name": "patient_email_sender",
-        "display_name": "Patient Email Sender",
-        "description": "Sends email to a patient. ⚠️ WARNING: This tool may only be used to send pre-approved, non-clinical messages to patients who have provided explicit consent. Clinical information must never be transmitted through this channel.",
+        "name": "system_email_sender",
+        "display_name": "System Email Sender",
+        "description": "Sends email from system account (mobiushealthai@gmail.com) via SMTP. Requires EMAIL_PASSWORD or EMAIL_APP_PASSWORD environment variable. Supports attachments and CC. Use this for system-generated emails.",
         "category": "communication",
         "version": "1.0.0",
         "schema_definition": {
-            "name": "patient_email_sender",
-            "description": "Sends email to a patient. ⚠️ WARNING: Only for pre-approved, non-clinical messages. Requires patient consent. Clinical information must never be transmitted through this channel.",
+            "name": "system_email_sender",
+            "description": "Sends email from system account (mobiushealthai@gmail.com) via SMTP. Requires EMAIL_PASSWORD environment variable. Supports attachments and CC.",
             "parameters": {
-                "patient_id": "str (Patient identifier)",
+                "to": "str (Recipient email address)",
                 "subject": "str (Email subject line)",
-                "body": "str (Email body content)",
-                "template_id": "Optional[str] (Pre-approved template identifier)",
-                "priority": "Optional[str] (Priority level: 'low', 'normal', 'high', default: 'normal')"
+                "message": "str (Email body content)",
+                "cc": "Optional[List[str]] (List of CC email addresses)",
+                "attachments": "Optional[List[Dict]] (List of attachments, each with 'filename', 'content' (bytes), 'content_type')"
             }
         },
         "parameters": [
             {
-                "parameter_name": "patient_id",
+                "parameter_name": "to",
                 "parameter_type": "string",
-                "description": "Patient identifier",
+                "description": "Recipient email address",
                 "is_required": True,
                 "order_index": 0
             },
@@ -539,27 +546,151 @@ TOOLS_TO_SEED = [
                 "order_index": 1
             },
             {
-                "parameter_name": "body",
+                "parameter_name": "message",
                 "parameter_type": "string",
                 "description": "Email body content",
                 "is_required": True,
                 "order_index": 2
             },
             {
-                "parameter_name": "template_id",
-                "parameter_type": "string",
-                "description": "Pre-approved template identifier",
+                "parameter_name": "cc",
+                "parameter_type": "array",
+                "description": "List of CC email addresses",
                 "is_required": False,
                 "order_index": 3
             },
             {
-                "parameter_name": "priority",
-                "parameter_type": "string",
-                "description": "Priority level",
+                "parameter_name": "attachments",
+                "parameter_type": "array",
+                "description": "List of attachments (each with filename, content (bytes), content_type)",
                 "is_required": False,
-                "default_value": "normal",
-                "validation_rules": {"enum": ["low", "normal", "high"]},
                 "order_index": 4
+            }
+        ],
+        "requires_human_review": False,
+        "is_batch_processable": False,
+        "estimated_execution_time_ms": 1000,
+        "is_deterministic": False,
+        "is_stateless": False,
+        "implementation_type": "python_class",
+        "implementation_path": "nexus.tools.communication.system_email_sender.SystemEmailSender",
+        "tags": ["communication", "email", "system", "smtp"],
+        "author": "System",
+        "status": "active",
+        "example_usage": "Send system emails from mobiushealthai@gmail.com. Requires EMAIL_PASSWORD or EMAIL_APP_PASSWORD environment variable. Use for automated system notifications."
+    },
+    {
+        "name": "user_email_sender",
+        "display_name": "User Email Sender",
+        "description": "Sends email from user's authenticated Gmail account via Gmail API with OAuth2. User must have authorized Gmail access via OAuth. Supports attachments and CC. Use this for user-initiated emails.",
+        "category": "communication",
+        "version": "1.0.0",
+        "schema_definition": {
+            "name": "user_email_sender",
+            "description": "Sends email from user's authenticated Gmail account via Gmail API with OAuth2. User must have authorized Gmail access via OAuth. Supports attachments and CC.",
+            "parameters": {
+                "to": "str (Recipient email address)",
+                "subject": "str (Email subject line)",
+                "message": "str (Email body content)",
+                "cc": "Optional[List[str]] (List of CC email addresses)",
+                "attachments": "Optional[List[Dict]] (List of attachments, each with 'filename', 'content' (bytes), 'content_type')",
+                "user_id": "Optional[str] (User ID for OAuth - defaults to system user)",
+                "sender_email": "Optional[str] (Gmail account to send from - uses first connected account if not specified)"
+            }
+        },
+        "parameters": [
+            {
+                "parameter_name": "to",
+                "parameter_type": "string",
+                "description": "Recipient email address",
+                "is_required": True,
+                "order_index": 0
+            },
+            {
+                "parameter_name": "subject",
+                "parameter_type": "string",
+                "description": "Email subject line",
+                "is_required": True,
+                "order_index": 1
+            },
+            {
+                "parameter_name": "message",
+                "parameter_type": "string",
+                "description": "Email body content",
+                "is_required": True,
+                "order_index": 2
+            },
+            {
+                "parameter_name": "cc",
+                "parameter_type": "array",
+                "description": "List of CC email addresses",
+                "is_required": False,
+                "order_index": 3
+            },
+            {
+                "parameter_name": "attachments",
+                "parameter_type": "array",
+                "description": "List of attachments (each with filename, content (bytes), content_type)",
+                "is_required": False,
+                "order_index": 4
+            },
+            {
+                "parameter_name": "user_id",
+                "parameter_type": "string",
+                "description": "User ID for OAuth (defaults to system user if not provided)",
+                "is_required": False,
+                "order_index": 5
+            },
+            {
+                "parameter_name": "sender_email",
+                "parameter_type": "string",
+                "description": "Gmail account to send from (uses first connected account if not specified)",
+                "is_required": False,
+                "order_index": 6
+            }
+        ],
+        "requires_human_review": False,
+        "is_batch_processable": False,
+        "estimated_execution_time_ms": 1000,
+        "is_deterministic": False,
+        "is_stateless": False,
+        "implementation_type": "python_class",
+        "implementation_path": "nexus.tools.communication.user_email_sender.UserEmailSender",
+        "tags": ["communication", "email", "user", "oauth", "gmail"],
+        "author": "System",
+        "status": "active",
+        "example_usage": "Send emails from user's Gmail account. Requires OAuth authorization via /api/google/oauth/authorize or /api/gmail/oauth/authorize. Use for user-initiated emails from their personal/work Gmail account."
+    },
+    {
+        "name": "system_sms_sender",
+        "display_name": "System SMS Sender",
+        "description": "Sends SMS from system account via SMS service provider (e.g., Twilio). Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER environment variables. Supports sending to any phone number. ⚠️ WARNING: SMS is unencrypted. Only send pre-approved, non-clinical messages with patient consent.",
+        "category": "communication",
+        "version": "1.0.0",
+        "implementation_status": "PARTIAL",  # PARTIAL: Real Twilio integration, but requires credentials
+        "schema_definition": {
+            "name": "system_sms_sender",
+            "description": "Sends SMS from system account via SMS service provider (e.g., Twilio). Requires TWILIO credentials.",
+            "parameters": {
+                "to": "str (Recipient phone number in E.164 format, e.g., +1234567890)",
+                "message": "str (SMS message content, max 160 characters recommended per segment)"
+            }
+        },
+        "parameters": [
+            {
+                "parameter_name": "to",
+                "parameter_type": "string",
+                "description": "Recipient phone number in E.164 format",
+                "is_required": True,
+                "order_index": 0
+            },
+            {
+                "parameter_name": "message",
+                "parameter_type": "string",
+                "description": "SMS message content",
+                "is_required": True,
+                "validation_rules": {"max_length": 500},
+                "order_index": 1
             }
         ],
         "requires_human_review": True,
@@ -568,157 +699,279 @@ TOOLS_TO_SEED = [
         "is_deterministic": False,
         "is_stateless": False,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.communication.email_tool.PatientEmailSender",
-        "tags": ["communication", "patient", "email"],
+        "implementation_path": "nexus.tools.communication.system_sms_sender.SystemSMSSender",
+        "tags": ["communication", "sms", "system"],
         "author": "System",
         "status": "active",
-        "example_usage": "✅ APPROVED: Send appointment reminder email using pre-approved template. ❌ NOT APPROVED: Sending test results or clinical information via email."
+        "example_usage": "✅ APPROVED: Send appointment reminder SMS using pre-approved template. ❌ NOT APPROVED: Sending test results, diagnoses, or any clinical information via SMS (unencrypted channel)."
     },
     {
-        "name": "patient_sms_sender",
-        "display_name": "Patient SMS Sender",
-        "description": "Sends SMS to a patient. ⚠️ WARNING: This tool may only be used to send pre-approved, non-clinical messages to patients who have provided explicit consent. SMS is unencrypted and clinical information must never be transmitted through this channel.",
+        "name": "user_sms_sender",
+        "display_name": "User SMS Sender",
+        "description": "Sends SMS from user's authenticated SMS account. User must have authorized SMS service access. Currently supports Twilio integration. ⚠️ WARNING: SMS is unencrypted. Only send pre-approved, non-clinical messages with patient consent.",
         "category": "communication",
         "version": "1.0.0",
+        "implementation_status": "STUB",  # STUB: Stub implementation, user SMS authentication not yet implemented
         "schema_definition": {
-            "name": "patient_sms_sender",
-            "description": "Sends SMS to a patient. ⚠️ WARNING: Only for pre-approved, non-clinical messages. Requires patient consent. SMS is unencrypted. Clinical information must never be transmitted through this channel.",
+            "name": "user_sms_sender",
+            "description": "Sends SMS from user's authenticated SMS account. User must have authorized SMS service access.",
             "parameters": {
-                "patient_id": "str (Patient identifier)",
-                "message": "str (SMS message content, max 160 characters recommended)",
-                "template_id": "Optional[str] (Pre-approved template identifier)",
-                "urgency": "Optional[str] (Urgency level: 'low', 'medium', 'high', default: 'medium')"
+                "to": "str (Recipient phone number in E.164 format, e.g., +1234567890)",
+                "message": "str (SMS message content, max 160 characters recommended per segment)",
+                "user_id": "Optional[str] (User ID for authentication - defaults to system user)",
+                "sender_phone": "Optional[str] (Phone number to send from - uses user's configured number if not specified)"
             }
         },
         "parameters": [
             {
-                "parameter_name": "patient_id",
+                "parameter_name": "to",
                 "parameter_type": "string",
-                "description": "Patient identifier",
+                "description": "Recipient phone number in E.164 format",
                 "is_required": True,
                 "order_index": 0
             },
             {
                 "parameter_name": "message",
                 "parameter_type": "string",
-                "description": "SMS message content (max 160 characters recommended)",
+                "description": "SMS message content",
                 "is_required": True,
                 "validation_rules": {"max_length": 500},
                 "order_index": 1
             },
             {
-                "parameter_name": "template_id",
+                "parameter_name": "user_id",
                 "parameter_type": "string",
-                "description": "Pre-approved template identifier",
+                "description": "User ID for authentication",
                 "is_required": False,
                 "order_index": 2
             },
             {
-                "parameter_name": "urgency",
+                "parameter_name": "sender_phone",
                 "parameter_type": "string",
-                "description": "Urgency level",
+                "description": "Phone number to send from",
                 "is_required": False,
-                "default_value": "medium",
-                "validation_rules": {"enum": ["low", "medium", "high"]},
                 "order_index": 3
             }
         ],
         "requires_human_review": True,
         "is_batch_processable": False,
-        "estimated_execution_time_ms": 500,
+        "estimated_execution_time_ms": 1000,
         "is_deterministic": False,
         "is_stateless": False,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.communication.sms_tool.PatientSMSSender",
-        "tags": ["communication", "patient", "sms"],
+        "implementation_path": "nexus.tools.communication.user_sms_sender.UserSMSSender",
+        "tags": ["communication", "sms", "user"],
         "author": "System",
         "status": "active",
         "example_usage": "✅ APPROVED: Send appointment reminder SMS using pre-approved template. ❌ NOT APPROVED: Sending test results, diagnoses, or any clinical information via SMS (unencrypted channel)."
     },
     {
-        "name": "patient_calendar_manager",
-        "display_name": "Patient Calendar Manager",
-        "description": "Creates or updates calendar events for a patient. ⚠️ WARNING: This tool may only be used to schedule non-clinical appointments for patients who have provided explicit consent. Clinical appointment scheduling must use approved clinical systems.",
+        "name": "system_calendar_manager",
+        "display_name": "System Calendar Manager",
+        "description": "Manages calendar events in the system calendar. Can read events and create new events. Uses system account (mobiushealthai@gmail.com).",
         "category": "communication",
         "version": "1.0.0",
         "schema_definition": {
-            "name": "patient_calendar_manager",
-            "description": "Creates or updates calendar events for a patient. ⚠️ WARNING: Only for scheduling non-clinical appointments. Requires patient consent. Clinical appointments must use approved clinical systems.",
+            "name": "system_calendar_manager",
+            "description": "Manages calendar events in the system calendar. Can read events and create new events. Uses system account (mobiushealthai@gmail.com).",
             "parameters": {
-                "patient_id": "str (Patient identifier)",
-                "event_type": "str (Event type: 'appointment', 'reminder', 'consultation', 'follow_up')",
-                "start_time": "str (Event start time in ISO 8601 format: YYYY-MM-DDTHH:MM:SS)",
-                "end_time": "str (Event end time in ISO 8601 format: YYYY-MM-DDTHH:MM:SS)",
-                "title": "str (Event title/subject)",
-                "location": "Optional[str] (Event location or address)",
-                "reminder_minutes": "Optional[int] (Minutes before event to send reminder, default: 60)"
+                "operation": "str (Operation: 'list_events', 'create_event', 'get_event')",
+                "calendar_id": "Optional[str] (Calendar ID, default: 'primary')",
+                "time_min": "Optional[str] (Start time for list_events, ISO 8601 format)",
+                "time_max": "Optional[str] (End time for list_events, ISO 8601 format)",
+                "max_results": "Optional[int] (Max results for list_events, default: 10)",
+                "event_id": "Optional[str] (Event ID for get_event operation)",
+                "event_summary": "Optional[str] (Event title for create_event)",
+                "event_start": "Optional[str] (Event start time for create_event, ISO 8601 format)",
+                "event_end": "Optional[str] (Event end time for create_event, ISO 8601 format)",
+                "event_description": "Optional[str] (Event description for create_event)",
+                "event_location": "Optional[str] (Event location for create_event)",
+                "attendees": "Optional[List[str]] (List of attendee email addresses for create_event)"
             }
         },
         "parameters": [
             {
-                "parameter_name": "patient_id",
+                "parameter_name": "operation",
                 "parameter_type": "string",
-                "description": "Patient identifier",
+                "description": "Operation to perform",
                 "is_required": True,
+                "validation_rules": {"enum": ["list_events", "create_event", "get_event"]},
                 "order_index": 0
             },
             {
-                "parameter_name": "event_type",
+                "parameter_name": "calendar_id",
                 "parameter_type": "string",
-                "description": "Event type",
-                "is_required": True,
-                "validation_rules": {"enum": ["appointment", "reminder", "consultation", "follow_up"]},
+                "description": "Calendar ID (default: 'primary')",
+                "is_required": False,
+                "default_value": "primary",
                 "order_index": 1
             },
             {
-                "parameter_name": "start_time",
+                "parameter_name": "event_summary",
                 "parameter_type": "string",
-                "description": "Event start time (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)",
-                "is_required": True,
+                "description": "Event title (required for create_event)",
+                "is_required": False,
                 "order_index": 2
             },
             {
-                "parameter_name": "end_time",
+                "parameter_name": "event_start",
                 "parameter_type": "string",
-                "description": "Event end time (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)",
-                "is_required": True,
+                "description": "Event start time in ISO 8601 format (required for create_event)",
+                "is_required": False,
                 "order_index": 3
             },
             {
-                "parameter_name": "title",
+                "parameter_name": "event_end",
                 "parameter_type": "string",
-                "description": "Event title/subject",
-                "is_required": True,
+                "description": "Event end time in ISO 8601 format (required for create_event)",
+                "is_required": False,
                 "order_index": 4
             },
             {
-                "parameter_name": "location",
+                "parameter_name": "event_description",
                 "parameter_type": "string",
-                "description": "Event location or address",
+                "description": "Event description",
                 "is_required": False,
                 "order_index": 5
             },
             {
-                "parameter_name": "reminder_minutes",
-                "parameter_type": "integer",
-                "description": "Minutes before event to send reminder",
+                "parameter_name": "event_location",
+                "parameter_type": "string",
+                "description": "Event location",
                 "is_required": False,
-                "default_value": "60",
-                "validation_rules": {"min": 0, "max": 10080},
                 "order_index": 6
+            },
+            {
+                "parameter_name": "attendees",
+                "parameter_type": "array",
+                "description": "List of attendee email addresses",
+                "is_required": False,
+                "order_index": 7
             }
         ],
-        "requires_human_review": True,
+        "requires_human_review": False,
         "is_batch_processable": False,
-        "estimated_execution_time_ms": 800,
+        "estimated_execution_time_ms": 1000,
         "is_deterministic": False,
         "is_stateless": False,
         "implementation_type": "python_class",
-        "implementation_path": "nexus.tools.communication.calendar_tool.PatientCalendarManager",
-        "tags": ["communication", "patient", "calendar", "scheduling"],
+        "implementation_path": "nexus.tools.communication.system_calendar_manager.SystemCalendarManager",
+        "tags": ["communication", "calendar", "system", "scheduling"],
         "author": "System",
         "status": "active",
-        "example_usage": "✅ APPROVED: Schedule non-clinical consultation or reminder appointment. ❌ NOT APPROVED: Scheduling medical appointments or procedures (use approved clinical systems)."
+        "example_usage": "Read and create calendar events in the system calendar account."
+    },
+    {
+        "name": "user_calendar_manager",
+        "display_name": "User Calendar Manager",
+        "description": "Manages calendar events in user's Google Calendar. Can read events and create new events. User must have authorized Google Calendar access via OAuth.",
+        "category": "communication",
+        "version": "1.0.0",
+        "schema_definition": {
+            "name": "user_calendar_manager",
+            "description": "Manages calendar events in user's Google Calendar. Can read events and create new events. User must have authorized Google Calendar access via OAuth.",
+            "parameters": {
+                "operation": "str (Operation: 'list_events', 'create_event', 'get_event')",
+                "calendar_id": "Optional[str] (Calendar ID, default: 'primary')",
+                "time_min": "Optional[str] (Start time for list_events, ISO 8601 format)",
+                "time_max": "Optional[str] (End time for list_events, ISO 8601 format)",
+                "max_results": "Optional[int] (Max results for list_events, default: 10)",
+                "event_id": "Optional[str] (Event ID for get_event operation)",
+                "event_summary": "Optional[str] (Event title for create_event)",
+                "event_start": "Optional[str] (Event start time for create_event, ISO 8601 format)",
+                "event_end": "Optional[str] (Event end time for create_event, ISO 8601 format)",
+                "event_description": "Optional[str] (Event description for create_event)",
+                "event_location": "Optional[str] (Event location for create_event)",
+                "attendees": "Optional[List[str]] (List of attendee email addresses for create_event)",
+                "user_id": "Optional[str] (User ID for OAuth - defaults to system user)",
+                "calendar_email": "Optional[str] (Calendar account email - uses first connected account if not specified)"
+            }
+        },
+        "parameters": [
+            {
+                "parameter_name": "operation",
+                "parameter_type": "string",
+                "description": "Operation to perform",
+                "is_required": True,
+                "validation_rules": {"enum": ["list_events", "create_event", "get_event"]},
+                "order_index": 0
+            },
+            {
+                "parameter_name": "calendar_id",
+                "parameter_type": "string",
+                "description": "Calendar ID (default: 'primary')",
+                "is_required": False,
+                "default_value": "primary",
+                "order_index": 1
+            },
+            {
+                "parameter_name": "event_summary",
+                "parameter_type": "string",
+                "description": "Event title (required for create_event)",
+                "is_required": False,
+                "order_index": 2
+            },
+            {
+                "parameter_name": "event_start",
+                "parameter_type": "string",
+                "description": "Event start time in ISO 8601 format (required for create_event)",
+                "is_required": False,
+                "order_index": 3
+            },
+            {
+                "parameter_name": "event_end",
+                "parameter_type": "string",
+                "description": "Event end time in ISO 8601 format (required for create_event)",
+                "is_required": False,
+                "order_index": 4
+            },
+            {
+                "parameter_name": "event_description",
+                "parameter_type": "string",
+                "description": "Event description",
+                "is_required": False,
+                "order_index": 5
+            },
+            {
+                "parameter_name": "event_location",
+                "parameter_type": "string",
+                "description": "Event location",
+                "is_required": False,
+                "order_index": 6
+            },
+            {
+                "parameter_name": "attendees",
+                "parameter_type": "array",
+                "description": "List of attendee email addresses",
+                "is_required": False,
+                "order_index": 7
+            },
+            {
+                "parameter_name": "user_id",
+                "parameter_type": "string",
+                "description": "User ID for OAuth (defaults to system user if not provided)",
+                "is_required": False,
+                "order_index": 8
+            },
+            {
+                "parameter_name": "calendar_email",
+                "parameter_type": "string",
+                "description": "Calendar account email (uses first connected account if not specified)",
+                "is_required": False,
+                "order_index": 9
+            }
+        ],
+        "requires_human_review": False,
+        "is_batch_processable": False,
+        "estimated_execution_time_ms": 1000,
+        "is_deterministic": False,
+        "is_stateless": False,
+        "implementation_type": "python_class",
+        "implementation_path": "nexus.tools.communication.user_calendar_manager.UserCalendarManager",
+        "tags": ["communication", "calendar", "user", "oauth", "scheduling"],
+        "author": "System",
+        "status": "active",
+        "example_usage": "Read and create calendar events in user's Google Calendar account. Requires OAuth authorization."
     },
     # Utility Tools
     {

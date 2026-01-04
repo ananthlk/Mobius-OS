@@ -389,20 +389,20 @@ export default function TaskCatalogPage() {
     });
 
     return (
-        <div className="h-full flex flex-col bg-white">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)]">
             {/* Header */}
-            <div className="border-b border-gray-200 px-6 py-4">
+            <div className="border-b border-[var(--border-subtle)] px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <Link
                             href="/dashboard/admin"
-                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            className="p-2 hover:bg-[var(--bg-secondary)] rounded-[var(--radius-md)] transition-colors"
                         >
-                            <ArrowLeft className="w-5 h-5 text-gray-600" />
+                            <ArrowLeft className="w-5 h-5 text-[var(--text-secondary)]" />
                         </Link>
                     <div>
-                            <h1 className="text-2xl font-semibold text-gray-900">Task Catalog</h1>
-                            <p className="text-sm text-gray-500 mt-1">
+                            <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Task Catalog</h1>
+                            <p className="text-sm text-[var(--text-secondary)] mt-1">
                                 Master reference system for all workflow tasks
                             </p>
                         </div>
@@ -413,25 +413,25 @@ export default function TaskCatalogPage() {
             {/* Main Content - Two Panels */}
             <div className="flex-1 flex overflow-hidden">
                 {/* Left Panel - Task List */}
-                <div className="w-1/2 border-r border-gray-200 flex flex-col">
+                <div className="w-1/2 border-r border-[var(--border-subtle)] flex flex-col">
                     {/* Search and Filters */}
-                    <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                    <div className="px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
                         <div className="flex items-center gap-2">
                             <div className="flex-1 relative">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
                                 <input
                                     type="text"
                                     placeholder="Search tasks..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    className="w-full pl-9 pr-3 py-2 text-sm border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                                 />
                             </div>
                             <select
                                 value={statusFilter}
                                 onChange={(e) => setStatusFilter(e.target.value)}
-                                className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                className="px-3 py-2 text-sm border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                             >
                                 <option value="all">All</option>
                                 <option value="draft">Draft</option>
@@ -440,7 +440,7 @@ export default function TaskCatalogPage() {
                             </select>
                             <button
                                 onClick={handleCreateNew}
-                                className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                                className="px-3 py-2 text-sm bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-dark)] transition-colors flex items-center gap-2"
                             >
                                 <Plus className="w-4 h-4" />
                                 New
@@ -452,13 +452,13 @@ export default function TaskCatalogPage() {
                     <div className="flex-1 overflow-y-auto">
                         {loading ? (
                             <div className="flex items-center justify-center h-64">
-                                <div className="text-gray-500">Loading tasks...</div>
+                                <div className="text-[var(--text-secondary)]">Loading tasks...</div>
                             </div>
                         ) : filteredTasks.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-64 text-center p-4">
-                                <CheckSquare className="w-12 h-12 text-gray-400 mb-4" />
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">No tasks found</h3>
-                                <p className="text-sm text-gray-500">
+                                <CheckSquare className="w-12 h-12 text-[var(--text-muted)] mb-4" />
+                                <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">No tasks found</h3>
+                                <p className="text-sm text-[var(--text-secondary)]">
                                     {searchQuery
                                         ? "Try adjusting your search or filters"
                                         : "Click 'New' to create a task"}
@@ -469,10 +469,10 @@ export default function TaskCatalogPage() {
                                 {filteredTasks.map((task) => (
                                     <div
                                         key={task.task_key}
-                                        className={`p-4 bg-white border rounded-lg transition-all ${
+                                        className={`p-4 bg-[var(--bg-primary)] border rounded-[var(--radius-md)] transition-all ${
                                             selectedTask?.task_key === task.task_key
-                                                ? "border-indigo-500 bg-indigo-50 shadow-md"
-                                                : "border-gray-200 hover:border-indigo-300 hover:shadow-sm"
+                                                ? "border-[var(--primary-blue)] bg-[var(--primary-blue-light)] shadow-md"
+                                                : "border-[var(--border-subtle)] hover:border-[var(--primary-blue)] hover:shadow-sm"
                                         }`}
                                     >
                                         <div
@@ -480,23 +480,23 @@ export default function TaskCatalogPage() {
                                             className="cursor-pointer"
                                         >
                                             <div className="flex items-start justify-between mb-2">
-                                                <h3 className="font-semibold text-gray-900">{task.name}</h3>
+                                                <h3 className="font-semibold text-[var(--text-primary)]">{task.name}</h3>
                                                 <span
                                                     className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                                                         task.status === "active"
                                                             ? "bg-green-100 text-green-700"
                                                             : task.status === "draft"
                                                             ? "bg-yellow-100 text-yellow-700"
-                                                            : "bg-gray-100 text-gray-700"
+                                                            : "bg-[var(--bg-secondary)] text-gray-700"
                                                     }`}
                                                 >
                                                     {task.status}
                                                 </span>
                                             </div>
-                                            <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                                            <p className="text-sm text-[var(--text-secondary)] mb-2 line-clamp-2">
                                                 {task.description || "No description"}
                                             </p>
-                                            <div className="flex items-center gap-3 text-xs text-gray-500">
+                                            <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
                                                 <span className="font-mono">{task.task_key}</span>
                                                 {task.classification?.domain && (
                                                     <span>• {task.classification.domain}</span>
@@ -506,13 +506,13 @@ export default function TaskCatalogPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-end">
+                                        <div className="mt-3 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-end">
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     handleClone(task);
                                                 }}
-                                                className="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1.5"
+                                                className="px-3 py-1.5 text-xs font-medium text-[var(--primary-blue)] bg-[var(--primary-blue-light)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-light)] transition-colors flex items-center gap-1.5"
                                                 title="Clone this task"
                                             >
                                                 <Copy className="w-3.5 h-3.5" />
@@ -527,21 +527,21 @@ export default function TaskCatalogPage() {
                 </div>
 
                 {/* Right Panel - Task Form */}
-                <div className="w-1/2 flex flex-col bg-gray-50">
+                <div className="w-1/2 flex flex-col bg-[var(--bg-secondary)]">
                     {selectedTask || (!selectedTask && formData.name) ? (
                         <div className="flex-1 overflow-y-auto p-6">
                             <div className="max-w-2xl mx-auto">
-                                <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+                                <div className="bg-[var(--bg-primary)] rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-6 space-y-6">
                                     {/* Header */}
-                                    <div className="flex items-center justify-between pb-4 border-b border-gray-200">
-                                        <h2 className="text-xl font-semibold text-gray-900">
+                                    <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
+                                        <h2 className="text-xl font-semibold text-[var(--text-primary)]">
                                             {selectedTask ? "Edit Task" : "New Task"}
                                         </h2>
                                         <div className="flex items-center gap-2">
                                             {selectedTask && (
                                                 <button
                                                     onClick={handleDelete}
-                                                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                    className="p-2 text-red-600 hover:bg-red-50 rounded-[var(--radius-md)] transition-colors"
                                                     title="Delete task"
                                                 >
                                                     <Trash2 className="w-5 h-5" />
@@ -549,7 +549,7 @@ export default function TaskCatalogPage() {
                                             )}
                                             <button
                                                 onClick={() => setSelectedTask(null)}
-                                                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                                className="p-2 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] rounded-[var(--radius-md)] transition-colors"
                                             >
                                                 <X className="w-5 h-5" />
                                             </button>
@@ -568,7 +568,7 @@ export default function TaskCatalogPage() {
                                                 onChange={(e) =>
                                                     setFormData({ ...formData, name: e.target.value })
                                                 }
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                                                 placeholder="Enter task name"
                                             />
                                         </div>
@@ -583,12 +583,12 @@ export default function TaskCatalogPage() {
                                                 onChange={(e) =>
                                                     setFormData({ ...formData, task_key: e.target.value })
                                                 }
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-sm"
+                                                className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent font-mono text-sm"
                                                 placeholder="Auto-generated from name"
                                                 disabled={!!selectedTask}
                                             />
                                             {selectedTask && (
-                                                <p className="text-xs text-gray-500 mt-1">Task key cannot be changed</p>
+                                                <p className="text-xs text-[var(--text-secondary)] mt-1">Task key cannot be changed</p>
                                             )}
                                         </div>
 
@@ -602,7 +602,7 @@ export default function TaskCatalogPage() {
                                                     setFormData({ ...formData, description: e.target.value })
                                                 }
                                                 rows={4}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                                                 placeholder="Enter task description"
                                             />
                                         </div>
@@ -617,7 +617,7 @@ export default function TaskCatalogPage() {
                                                     onChange={(e) =>
                                                         setFormData({ ...formData, status: e.target.value })
                                                     }
-                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                    className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                                                 >
                                                     <option value="draft">Draft</option>
                                                     <option value="active">Active</option>
@@ -638,7 +638,7 @@ export default function TaskCatalogPage() {
                                                             version: parseInt(e.target.value) || 1,
                                                         })
                                                     }
-                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                    className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                                                 />
                                             </div>
                                         </div>
@@ -647,11 +647,11 @@ export default function TaskCatalogPage() {
                                         {schema && !schemaLoading ? (
                                             <>
                                                 {/* Classification */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group" open>
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Classification</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -666,11 +666,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Automation */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Automation</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -685,11 +685,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Tool Binding */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Tool Binding Defaults</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -704,11 +704,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Information */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Information</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -723,11 +723,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Policy */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Policy & Permissions</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -742,11 +742,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Temporal */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Temporal</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -761,11 +761,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Escalation */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Escalation</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -780,11 +780,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Dependencies */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Dependencies</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -799,11 +799,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Failure */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Failure Handling</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -818,11 +818,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* UI */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>UI</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -837,11 +837,11 @@ export default function TaskCatalogPage() {
                                                 </div>
 
                                                 {/* Governance */}
-                                                <div className="pt-4 border-t border-gray-200">
+                                                <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                     <details className="group">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                             <span>Governance</span>
-                                                            <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                            <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                         </summary>
                                                         <div className="mt-3">
                                                             <TaskFormFields
@@ -857,11 +857,11 @@ export default function TaskCatalogPage() {
 
                                                 {/* Contract - Keep as JSON editor for now (not in schema) */}
                                                 {formData.contract !== undefined && (
-                                                    <div className="pt-4 border-t border-gray-200">
+                                                    <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                         <details className="group">
-                                                            <summary className="cursor-pointer text-sm font-semibold text-gray-900 mb-3 list-none flex items-center justify-between">
+                                                            <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)] mb-3 list-none flex items-center justify-between">
                                                                 <span>Contract</span>
-                                                                <span className="text-gray-400 group-open:rotate-90 transition-transform">›</span>
+                                                                <span className="text-[var(--text-muted)] group-open:rotate-90 transition-transform">›</span>
                                                             </summary>
                                                             <div className="mt-3">
                                                                 <textarea
@@ -878,7 +878,7 @@ export default function TaskCatalogPage() {
                                                                         }
                                                                     }}
                                                                     rows={6}
-                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-xs"
+                                                                    className="w-full px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent font-mono text-xs"
                                                                     placeholder="{}"
                                                                 />
                                                             </div>
@@ -887,22 +887,22 @@ export default function TaskCatalogPage() {
                                                 )}
                                             </>
                                         ) : schemaLoading ? (
-                                            <div className="pt-4 border-t border-gray-200">
-                                                <p className="text-sm text-gray-500">Loading schema...</p>
+                                            <div className="pt-4 border-t border-[var(--border-subtle)]">
+                                                <p className="text-sm text-[var(--text-secondary)]">Loading schema...</p>
                                             </div>
                                         ) : (
-                                            <div className="pt-4 border-t border-gray-200">
+                                            <div className="pt-4 border-t border-[var(--border-subtle)]">
                                                 <p className="text-sm text-red-500">Schema not available. Using fallback JSON editors.</p>
                                             </div>
                                         )}
 
                                         {/* Metadata (if editing existing task) */}
                                         {selectedTask && (
-                                            <div className="pt-4 border-t border-gray-200">
-                                                <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                                            <div className="pt-4 border-t border-[var(--border-subtle)]">
+                                                <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
                                                     Metadata
                                                 </h3>
-                                                <div className="space-y-2 text-sm text-gray-600">
+                                                <div className="space-y-2 text-sm text-[var(--text-secondary)]">
                                                     {selectedTask.task_id && (
                                                         <div>
                                                             <span className="font-medium">Task ID:</span>{" "}
@@ -929,17 +929,17 @@ export default function TaskCatalogPage() {
                                     </div>
 
                                     {/* Action Buttons */}
-                                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-[var(--border-subtle)]">
                                         <button
                                             onClick={() => setSelectedTask(null)}
-                                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:bg-[var(--bg-secondary)] transition-colors"
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             onClick={handleSave}
                                             disabled={saving || !formData.name}
-                                            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                            className="px-4 py-2 text-sm font-medium text-[var(--bg-primary)] bg-[var(--primary-blue)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-dark)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                         >
                                             <Save className="w-4 h-4" />
                                             {saving ? "Saving..." : "Save"}
@@ -952,15 +952,15 @@ export default function TaskCatalogPage() {
                         <div className="flex-1 flex items-center justify-center">
                             <div className="text-center">
                                 <CheckSquare className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                                <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">
                                     Select a task to edit
                                 </h3>
-                                <p className="text-sm text-gray-500 mb-4">
+                                <p className="text-sm text-[var(--text-secondary)] mb-4">
                                     Click on a task from the list or create a new one
                                 </p>
                                 <button
                                     onClick={handleCreateNew}
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 mx-auto"
+                                    className="px-4 py-2 bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-dark)] transition-colors flex items-center gap-2 mx-auto"
                                 >
                                     <Plus className="w-4 h-4" />
                                     Create New Task

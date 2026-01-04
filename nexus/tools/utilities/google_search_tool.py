@@ -60,3 +60,4 @@ class GoogleSearchTool(NexusTool):
             "note": "This is a mock implementation. Integrate with Google Custom Search API for production use."
         }
 
+

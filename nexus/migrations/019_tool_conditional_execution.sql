@@ -49,3 +49,4 @@ COMMENT ON COLUMN tool_execution_conditions.condition_expression IS 'JSONB struc
 COMMENT ON COLUMN tool_execution_conditions.icon_name IS 'Icon identifier for UI display (e.g., if-check, on-success, on-failure)';
 
 
+

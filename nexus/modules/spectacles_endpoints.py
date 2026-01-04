@@ -28,6 +28,16 @@ class ExtensionChatRequest(BaseModel):
     messages: List[Message]
     context_id: Optional[str] = None # Link to previously sent context
 
+class EmailContext(BaseModel):
+    subject: str
+    from_: str  # Use from_ in Python (from is reserved keyword)
+    body: str
+    client: str
+
+class EmailDraftRequest(BaseModel):
+    user_id: str
+    email_context: EmailContext
+
 # --- Helper Services ---
 async def log_spectacles_event(user_id: str, event_type: str, details: str):
     query = "INSERT INTO interactions (user_id, role, content) VALUES (:user_id, :role, :content)"
@@ -73,4 +83,65 @@ async def execute_command(command: ActionCommand, background_tasks: BackgroundTa
         "status": "success",
         "result": result_text,
         "action_taken": command.command
+    }
+
+@router.post("/email/draft")
+async def draft_email_reply(request: EmailDraftRequest, background_tasks: BackgroundTasks):
+    """
+    Generate a draft reply for an email.
+    Currently returns a stub reply.
+    """
+    email_ctx = request.email_context
+    
+    # Log the email draft request
+    log_details = f"Draft request for email from {email_ctx.from_}, subject: {email_ctx.subject[:100]}"
+    background_tasks.add_task(log_spectacles_event, request.user_id, "email_draft_request", log_details)
+    
+    # Stub reply - in the future this will use LLM to generate actual draft
+    stub_reply = "Thank you for your email. I will review this and get back to you soon."
+    
+    # Log the draft response
+    background_tasks.add_task(log_spectacles_event, request.user_id, "email_draft_response", f"Draft generated: {stub_reply}")
+    
+    return {
+        "status": "success",
+        "draft": stub_reply,
+        "user_id": request.user_id
+    }
+
+class ScrapeRequest(BaseModel):
+    user_id: str
+    scrape_type: str  # 'page' or 'tree'
+    data: Dict[str, Any]
+
+@router.post("/scrape")
+async def save_scraped_data(request: ScrapeRequest, background_tasks: BackgroundTasks):
+    """
+    Save scraped page data or DOM tree.
+    """
+    scrape_type = request.scrape_type
+    data = request.data
+    
+    # Log the scrape request
+    url = data.get('url', 'unknown')
+    log_details = f"Scrape {scrape_type} from {url}"
+    background_tasks.add_task(log_spectacles_event, request.user_id, f"scrape_{scrape_type}", log_details)
+    
+    # Store scraped data (in production, this would go to a database or storage)
+    # For now, just log it
+    if scrape_type == 'page':
+        text_length = data.get('textLength', 0)
+        links_count = len(data.get('links', []))
+        images_count = len(data.get('images', []))
+        log_details = f"Page scraped: {text_length} chars, {links_count} links, {images_count} images"
+    elif scrape_type == 'tree':
+        log_details = f"DOM tree scraped: {url}"
+    
+    background_tasks.add_task(log_spectacles_event, request.user_id, f"scrape_{scrape_type}_saved", log_details)
+    
+    return {
+        "status": "success",
+        "scrape_type": scrape_type,
+        "url": url,
+        "saved_at": time.time()
     }

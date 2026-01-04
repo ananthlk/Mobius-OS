@@ -1,0 +1,83 @@
+{
+  "test_date": "2026-01-03T21:24:24.383819",
+  "total_tools": 7,
+  "passed": 6,
+  "failed": 1,
+  "implementation_breakdown": {
+    "functional": 0,
+    "api": 1,
+    "mock": 5
+  },
+  "tools": [
+    {
+      "name": "patient_email_sender",
+      "category": "communication",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": false,
+      "implementation_type": "UNKNOWN",
+      "requires_config": true,
+      "status": "\u274c Error: Failed to send email: Patient email not found for patient PATIENT_001. Patient not found or API unavailable."
+    },
+    {
+      "name": "patient_sms_sender",
+      "category": "communication",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "MOCK",
+      "requires_config": false,
+      "status": "\u2705 Tool works correctly"
+    },
+    {
+      "name": "patient_calendar_manager",
+      "category": "communication",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "MOCK",
+      "requires_config": false,
+      "status": "\u2705 Tool works correctly"
+    },
+    {
+      "name": "google_search",
+      "category": "utility",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "MOCK",
+      "requires_config": false,
+      "status": "\u2705 Tool works correctly"
+    },
+    {
+      "name": "maps_plotting",
+      "category": "utility",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "MOCK",
+      "requires_config": false,
+      "status": "\u2705 Tool works correctly"
+    },
+    {
+      "name": "generic_llm_call",
+      "category": "utility",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "MOCK",
+      "requires_config": false,
+      "status": "\u2705 Tool works correctly"
+    },
+    {
+      "name": "patient_demographics_retriever",
+      "category": "data_retrieval",
+      "loads": true,
+      "schema_defined": true,
+      "test_passed": true,
+      "implementation_type": "API",
+      "requires_config": true,
+      "status": "\u2705 Tool works correctly"
+    }
+  ]
+}

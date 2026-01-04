@@ -63,15 +63,15 @@ export default function ProcessCards({
         let baseClass = "p-3 rounded-lg border-2 transition-all cursor-pointer hover:shadow-md ";
         
         if (isSelected) {
-            baseClass += "border-blue-500 bg-blue-50 ";
+            baseClass += "border-[var(--primary-blue)] bg-[var(--primary-blue-light)] ";
         } else if (issue) {
             if (issue.issue_type === "missing_info") {
-                baseClass += "border-red-300 bg-red-50 ";
+                baseClass += "border-[var(--brand-red)] bg-[var(--brand-red-light)] ";
             } else {
-                baseClass += "border-yellow-300 bg-yellow-50 ";
+                baseClass += "border-[var(--brand-yellow)] bg-[var(--brand-yellow-light)] ";
             }
         } else {
-            baseClass += "border-gray-200 bg-white ";
+            baseClass += "border-[var(--border-subtle)] bg-[var(--bg-primary)] ";
         }
         
         return baseClass;
@@ -80,12 +80,12 @@ export default function ProcessCards({
     return (
         <div className="h-full overflow-y-auto p-4 space-y-4 custom-scrollbar">
             <div className="mb-4">
-                <h2 className="text-lg font-semibold text-gray-800">Process Cards</h2>
-                <p className="text-sm text-gray-500">Review your workflow phases and steps</p>
+                <h2 className="text-lg font-semibold text-[var(--text-primary)]">Process Cards</h2>
+                <p className="text-sm text-[var(--text-secondary)]">Review your workflow phases and steps</p>
             </div>
 
             {phases.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
+                <div className="text-center py-8 text-[var(--text-muted)]">
                     <Info className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     <p>No phases available yet</p>
                 </div>
@@ -95,7 +95,7 @@ export default function ProcessCards({
                     const phaseSteps = phase.steps || [];
                     
                     return (
-                        <div key={phase.id} className="border border-gray-200 rounded-lg bg-white">
+                        <div key={phase.id} className="border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-primary)]">
                             {/* Phase Header */}
                             <button
                                 onClick={() => togglePhase(phase.id)}
@@ -104,13 +104,13 @@ export default function ProcessCards({
                                 <div className="flex items-center gap-3">
                                     <div className={`w-2 h-2 rounded-full ${isExpanded ? 'bg-blue-500' : 'bg-gray-300'}`} />
                                     <div className="text-left">
-                                        <h3 className="font-semibold text-gray-800">{phase.name}</h3>
+                                        <h3 className="font-semibold text-[var(--text-primary)]">{phase.name}</h3>
                                         {phase.description && (
-                                            <p className="text-xs text-gray-500 mt-1">{phase.description}</p>
+                                            <p className="text-xs text-[var(--text-secondary)] mt-1">{phase.description}</p>
                                         )}
                                     </div>
                                 </div>
-                                <span className="text-xs text-gray-400">
+                                <span className="text-xs text-[var(--text-muted)]">
                                     {phaseSteps.length} step{phaseSteps.length !== 1 ? 's' : ''}
                                 </span>
                             </button>
@@ -119,7 +119,7 @@ export default function ProcessCards({
                             {isExpanded && (
                                 <div className="px-4 pb-4 space-y-2">
                                     {phaseSteps.length === 0 ? (
-                                        <p className="text-sm text-gray-400 italic py-2">No steps in this phase</p>
+                                        <p className="text-sm text-[var(--text-muted)] italic py-2">No steps in this phase</p>
                                     ) : (
                                         phaseSteps.map((step) => {
                                             const issue = getStepIssue(step.id);
@@ -144,7 +144,7 @@ export default function ProcessCards({
                                                         )}
 
                                                         <div className="flex-1 min-w-0">
-                                                            <p className="text-sm font-medium text-gray-800">
+                                                            <p className="text-sm font-medium text-[var(--text-primary)]">
                                                                 {step.description || `Step ${step.id}`}
                                                             </p>
                                                             
@@ -162,7 +162,7 @@ export default function ProcessCards({
                                                             )}
 
                                                             {step.tool_hint && (
-                                                                <p className="text-xs text-gray-500 mt-1">
+                                                                <p className="text-xs text-[var(--text-secondary)] mt-1">
                                                                     Tool: {step.tool_hint}
                                                                     {step.tool_matched ? (
                                                                         <span className="text-green-600 ml-1">✓</span>
@@ -186,4 +186,5 @@ export default function ProcessCards({
         </div>
     );
 }
+
 

@@ -33,3 +33,4 @@ COMMENT ON TABLE eligibility_plan_templates IS 'Stores deterministic plan templa
 COMMENT ON COLUMN eligibility_plan_templates.template_config IS 'Contains phases, steps, tool mappings';
 COMMENT ON COLUMN eligibility_plan_templates.match_pattern IS 'Pattern to match gate states or context for this template';
 
+

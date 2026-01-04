@@ -40,3 +40,4 @@ COMMENT ON COLUMN journey_state.status IS 'Session status (e.g., "GATHERING", "P
 COMMENT ON COLUMN journey_state.step_details IS 'Additional step metadata (e.g., completed_gates, next_gate, next_question)';
 
 
+

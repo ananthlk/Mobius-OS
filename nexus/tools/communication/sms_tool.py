@@ -7,6 +7,13 @@ from typing import Any, Dict, Optional
 from nexus.core.base_tool import NexusTool, ToolSchema
 from datetime import datetime
 import uuid
+import os
+import logging
+
+logger = logging.getLogger("nexus.tools.sms")
+
+# API Configuration
+API_BASE_URL = os.getenv("MOBIUS_API_URL", "http://localhost:8000")
 
 class PatientSMSSender(NexusTool):
     """
@@ -27,6 +34,21 @@ class PatientSMSSender(NexusTool):
                 "urgency": "Optional[str] (Urgency level: 'low', 'medium', 'high', default: 'medium')"
             }
         )
+    
+    def _get_patient_phone(self, patient_id: str) -> Optional[str]:
+        """Get patient phone from user profile API."""
+        try:
+            import httpx
+            url = f"{API_BASE_URL}/api/user-profiles/{patient_id}/system"
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(url)
+                if response.status_code == 200:
+                    system_data = response.json()
+                    demographics = system_data.get("demographics", {})
+                    return demographics.get("phone")
+        except Exception as e:
+            logger.debug(f"Failed to fetch patient phone from API: {e}")
+        return None
     
     def run(
         self, 
@@ -62,4 +84,5 @@ class PatientSMSSender(NexusTool):
             "channel": "sms",
             "warning": "This is a mock implementation. SMS is unencrypted. Ensure patient consent and message approval before sending."
         }
+
 

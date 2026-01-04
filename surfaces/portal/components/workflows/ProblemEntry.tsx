@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 
 // Matches backend DiagnosisResult
 export interface DiagnosticResult {
@@ -17,6 +18,7 @@ interface ProblemEntryProps {
 }
 
 export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
+    const { data: session } = useSession();
     const [query, setQuery] = useState("");
     // Default fallback list if API fails or no recent searches
     const [trendingIssues, setTrendingIssues] = useState<string[]>([
@@ -37,10 +39,11 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
         // Make API call in background (non-blocking)
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const user_id = session?.user?.id || "anonymous";
             const res = await fetch(`${apiUrl}/api/workflows/shaping/start`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query, user_id: "user_123" }), // Mock user_id for now
+                body: JSON.stringify({ query, user_id }),
             });
             const data = await res.json();
 
@@ -107,7 +110,7 @@ export default function ProblemEntry({ onDiagnose }: ProblemEntryProps) {
                             onChange={(e) => setQuery(e.target.value)}
                             onKeyDown={handleKeyDown}
                             className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-[#1f1f1f] placeholder-[#5F6368] focus:outline-none focus:ring-0 font-light"
-                            placeholder="Ask Mobius a question..."
+                            placeholder="Ask Möbius a question..."
                             autoFocus
                         />
                         <button

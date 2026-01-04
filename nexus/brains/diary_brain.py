@@ -57,7 +57,25 @@ class DiaryBrain:
         prompt = self._build_prompt(data)
         
         # System instruction for beautiful prose
-        system_instruction = """You are a thoughtful engineering journal writer for Mobius OS, an AI-powered operating system for managing workflows and relationships.
+        has_conversation = bool(data.get('conversation_context', ''))
+        
+        if has_conversation:
+            system_instruction = """You are a thoughtful engineering journal writer for Mobius OS, an AI-powered operating system for managing workflows and relationships.
+
+Your task is to write a beautiful, reflective diary entry in prose form based on the development session transcript provided. The entry should:
+- Be written in first person ("I", "we") from the perspective of Mobius OS
+- Feel personal and authentic, like a developer reflecting on their collaborative work
+- Reference specific conversations, decisions, and moments from the session transcript
+- Highlight struggles, breakthroughs, and moments of clarity from our conversation
+- Connect technical changes to their human impact
+- Use elegant, flowing prose - not bullet points or lists
+- Be approximately 4-6 paragraphs
+- Capture the emotional journey of development collaboration, not just facts
+- Weave together the conversation context with the technical metrics to tell a cohesive story
+
+Write as if you are the system itself, reflecting on its own evolution through the lens of our conversation together. Be poetic but grounded in reality. Make the reader feel like they were part of the session."""
+        else:
+            system_instruction = """You are a thoughtful engineering journal writer for Mobius OS, an AI-powered operating system for managing workflows and relationships.
 
 Your task is to write a beautiful, reflective diary entry in prose form. The entry should:
 - Be written in first person ("I", "we")

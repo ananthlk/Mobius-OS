@@ -6,7 +6,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-    title: "Mobius OS",
+    title: "Möbius OS",
     description: "Community Mental Health Operating System",
 };
 

@@ -72,10 +72,10 @@ if [ -z "$CONVERSATION_CONTEXT" ]; then
     # This will be handled by Python script if DB is available
 fi
 
-# Count lines of code
-PYTHON_LINES=$(find "$PROJECT_ROOT/nexus" -name "*.py" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-TSX_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.tsx" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-TS_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.ts" -type f 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+# Count lines of code (using -exec to handle paths with spaces, excluding node_modules and .next)
+PYTHON_LINES=$(find "$PROJECT_ROOT/nexus" -name "*.py" -type f -not -path "*/venv*" -not -path "*/__pycache__/*" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+TSX_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.tsx" -type f -not -path "*/node_modules/*" -not -path "*/.next/*" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+TS_LINES=$(find "$PROJECT_ROOT/surfaces/portal" -name "*.ts" -type f -not -path "*/node_modules/*" -not -path "*/.next/*" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 
 # Collect git activity
 COMMITS=""
@@ -151,7 +151,12 @@ export DATA_FILE="$DATA_FILE"
 export PROJECT_ROOT="$PROJECT_ROOT"
 
 # Capture stderr for database fetch messages, but suppress LLM errors
-PROSE=$(python3 << 'PYTHON_SCRIPT' 2> >(grep -E "(✓|Fetched|interactions)" || grep -vE "(LLM|Error|Failed|Could not)" || true)
+# Filter out crypto module print statements that contaminate prose output
+# Capture stdout (prose) and stderr (debug) to separate temp files
+TEMP_STDERR=$(mktemp)
+TEMP_STDOUT=$(mktemp)
+# Run Python script and capture both stdout and stderr
+python3 << 'PYTHON_SCRIPT' > "$TEMP_STDOUT" 2> "$TEMP_STDERR"
 import asyncio
 import sys
 import json
@@ -179,7 +184,6 @@ try:
                 try:
                     from nexus.modules.database import database
                     from nexus.modules.config_manager import config_manager
-                    import os
                     from dotenv import load_dotenv
                     
                     # Load environment for database connection
@@ -255,11 +259,12 @@ try:
                     pass  # Import failed, skip
             
             prose = await diary_brain.write_entry(data)
-            if prose and not prose.startswith("Error:"):
+            if prose and not prose.startswith("Error:") and len(prose.strip()) > 50:
+                # Only print if we got substantial prose (not just a short error message)
                 print(prose)
             else:
-                # Fallback if LLM returned error
-                raise Exception("LLM returned error")
+                # Fallback if LLM returned error or empty
+                raise Exception("LLM returned error or empty prose")
         except Exception as e:
             # Fallback - don't print error (suppressed by 2>/dev/null)
             commits_count = len(data.get('commits', []))
@@ -275,7 +280,28 @@ except ImportError as e:
     # Fallback if module can't be imported
     print("Today marked another step in the evolution of Mobius OS. The system continues to grow and evolve.")
 PYTHON_SCRIPT
-)
+PYTHON_EXIT_CODE=$?
+
+# Check Python script exit code
+if [ -n "$PYTHON_EXIT_CODE" ] && [ "$PYTHON_EXIT_CODE" -ne 0 ]; then
+    echo "   ⚠️  Debug: Python script exited with code $PYTHON_EXIT_CODE" >&2
+    echo "   ⚠️  Debug: stderr content: $(head -20 "$TEMP_STDERR" 2>/dev/null || echo 'empty')" >&2
+fi
+
+# Extract prose from stdout, filtering out crypto messages
+if [ -s "$TEMP_STDOUT" ]; then
+    PROSE=$(grep -vE "(Crypto Loaded|WARNING: MOBIUS_MASTER_KEY|Generated Temporary)" "$TEMP_STDOUT" 2>/dev/null || cat "$TEMP_STDOUT" 2>/dev/null || true)
+else
+    echo "   ⚠️  Debug: TEMP_STDOUT is empty (size: $(wc -c < "$TEMP_STDOUT" 2>/dev/null || echo 0))" >&2
+    echo "   ⚠️  Debug: stderr preview: $(head -5 "$TEMP_STDERR" 2>/dev/null | head -c 200 || echo 'empty')" >&2
+    PROSE=""
+fi
+
+# Show database fetch messages if any
+if [ -s "$TEMP_STDERR" ]; then
+    grep -E "(✓|Fetched|interactions)" "$TEMP_STDERR" 2>/dev/null || true
+fi
+rm -f "$TEMP_STDERR" "$TEMP_STDOUT"
 
 # Clean up temp file
 rm -f "$DATA_FILE"
@@ -291,6 +317,12 @@ EOF
 fi
 
 # Append new section with LLM-generated prose
+# Debug: Check if PROSE is empty
+if [ -z "$PROSE" ] || [ "$PROSE" = "" ]; then
+    echo "   ⚠️  Warning: No prose generated, using fallback" >&2
+    PROSE="Today marked another step in the evolution of Mobius OS. The codebase continues to grow, with $PYTHON_LINES lines of Python and $((TSX_LINES + TS_LINES)) lines of TypeScript forming the foundation of our system."
+fi
+
 cat >> "$DIARY_FILE" << EOF
 
 ---

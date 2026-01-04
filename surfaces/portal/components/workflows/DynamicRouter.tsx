@@ -111,12 +111,12 @@ export default function DynamicRouter({
                                     return newSet;
                                 });
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-1 hover:bg-[var(--bg-secondary)] rounded"
                         >
                             {isExpanded ? (
-                                <ChevronDown size={16} className="text-gray-500" />
+                                <ChevronDown size={16} className="text-[var(--text-secondary)]" />
                             ) : (
-                                <ChevronRight size={16} className="text-gray-500" />
+                                <ChevronRight size={16} className="text-[var(--text-secondary)]" />
                             )}
                         </button>
                     )}
@@ -133,7 +133,7 @@ export default function DynamicRouter({
                                         handleInputSubmit(option);
                                     }
                                 }}
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="flex-1 px-3 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
                                 disabled={disabled}
                             />
                             {option.input_required && inputValue && (
@@ -153,8 +153,8 @@ export default function DynamicRouter({
                             className={`
                                 flex-1 text-left px-4 py-3 rounded-lg border-2 transition-all
                                 ${selectedPath.includes(option.id)
-                                    ? 'bg-blue-50 border-blue-500 text-blue-700'
-                                    : 'bg-white border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+                                    ? 'bg-[var(--primary-blue-light)] border-[var(--primary-blue)] text-[var(--primary-blue-dark)]'
+                                    : 'bg-[var(--bg-primary)] border-[var(--border-subtle)] hover:border-[var(--primary-blue)] hover:bg-[var(--primary-blue-light)]'
                                 }
                                 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                             `}
@@ -167,7 +167,7 @@ export default function DynamicRouter({
                                 <div className="flex-1">
                                     <div className="font-medium">{option.label}</div>
                                     {option.description && (
-                                        <div className="text-sm text-gray-600 mt-1">
+                                        <div className="text-sm text-[var(--text-secondary)] mt-1">
                                             {option.description}
                                         </div>
                                     )}
@@ -188,9 +188,9 @@ export default function DynamicRouter({
     };
 
     return (
-        <div className="my-4 p-4 rounded-xl border-2 bg-white border-gray-200">
+        <div className="my-4 p-4 rounded-xl border-2 bg-[var(--bg-primary)] border-[var(--border-subtle)]">
             {message && (
-                <p className="text-sm font-medium text-gray-700 mb-4">{message}</p>
+                <p className="text-sm font-medium text-[var(--text-primary)] mb-4">{message}</p>
             )}
             <div className="space-y-2">
                 {options.map(option => renderOption(option))}

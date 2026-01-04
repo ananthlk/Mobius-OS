@@ -1,5 +1,6 @@
 import { signIn } from "@/auth";
 import MobiusIcon from "@/components/MobiusIcon";
+import BrandName from "@/components/BrandName";
 
 export default function SignIn() {
     return (
@@ -14,7 +15,7 @@ export default function SignIn() {
 
                 <h1 className="text-2xl font-normal text-[var(--text-primary)] mb-2">Sign in</h1>
                 <p className="text-base text-[var(--text-secondary)] mb-10">
-                    to continue to Mobius OS
+                    to continue to <BrandName variant="withOS" />
                 </p>
 
                 <form

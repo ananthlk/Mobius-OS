@@ -124,12 +124,12 @@ export default function PromptsPage() {
             <div className="mb-6">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900 mb-2">Prompt Management</h1>
-                        <p className="text-gray-500">Manage and refine prompts for all agents</p>
+                        <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">Prompt Management</h1>
+                        <p className="text-[var(--text-secondary)]">Manage and refine prompts for all agents</p>
                     </div>
                     <button
                         onClick={handleCreate}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-dark)] transition-colors"
                     >
                         <Plus size={20} />
                         Create Prompt
@@ -139,19 +139,19 @@ export default function PromptsPage() {
                 {/* Filters */}
                 <div className="flex gap-4 items-center">
                     <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)]" size={18} />
                         <input
                             type="text"
                             placeholder="Search prompts..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            className="w-full pl-10 pr-4 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent"
                         />
                     </div>
                     <select
                         value={filterModule}
                         onChange={(e) => setFilterModule(e.target.value)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        className="px-4 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)]"
                     >
                         <option value="">All Modules</option>
                         {modules.map(m => (
@@ -161,7 +161,7 @@ export default function PromptsPage() {
                     <select
                         value={filterDomain}
                         onChange={(e) => setFilterDomain(e.target.value)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        className="px-4 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)]"
                     >
                         <option value="">All Domains</option>
                         {domains.map(d => (
@@ -171,7 +171,7 @@ export default function PromptsPage() {
                     <select
                         value={filterMode}
                         onChange={(e) => setFilterMode(e.target.value)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                className="px-4 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)]"
                     >
                         <option value="">All Modes</option>
                         {modes.map(m => (
@@ -181,7 +181,7 @@ export default function PromptsPage() {
                     <select
                         value={filterStep}
                         onChange={(e) => setFilterStep(e.target.value)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                className="px-4 py-2 border border-[var(--border-subtle)] rounded-[var(--radius-md)] focus:ring-2 focus:ring-[var(--primary-blue)]"
                     >
                         <option value="">All Steps</option>
                         {steps.map(s => (
@@ -194,13 +194,13 @@ export default function PromptsPage() {
             {/* Prompts Grid */}
             {loading ? (
                 <div className="flex-1 flex items-center justify-center">
-                    <div className="text-gray-500">Loading prompts...</div>
+                    <div className="text-[var(--text-secondary)]">Loading prompts...</div>
                 </div>
             ) : filteredPrompts.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
-                        <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500">No prompts found</p>
+                        <FileText className="w-16 h-16 text-[var(--text-muted)] mx-auto mb-4" />
+                        <p className="text-[var(--text-secondary)]">No prompts found</p>
                     </div>
                 </div>
             ) : (

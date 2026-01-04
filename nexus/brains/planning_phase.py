@@ -31,6 +31,8 @@ class PlanningPhaseBrain:
     
     def __init__(self):
         self.mem = MemoryLogger("nexus.planning_phase")
+        from nexus.brains.bounded_plan import bounded_plan_brain
+        self.bounded_plan_brain = bounded_plan_brain
 
     async def announce_planning_phase_start(
         self, 
@@ -210,7 +212,75 @@ What would you like to do next?"""
         from nexus.conductors.workflows.orchestrator import orchestrator
         
         if decision == "create_new" or decision == "build_new":  # Support both for backward compatibility
-            # Guide plan to implementable state
+            # Check if bounded_plan_state exists (bounded plan flow active)
+            bounded_plan_state = session.get("bounded_plan_state") if session else None
+            
+            if bounded_plan_state:
+                # Route to bounded plan flow
+                logger.debug(f"[PlanningPhaseBrain.handle_message] ROUTING_TO_BOUNDED_PLAN | session_id={session_id}")
+                try:
+                    # Load session state
+                    from nexus.brains.bounded_plan import SessionState
+                    session_state = SessionState.from_dict(bounded_plan_state)
+                    
+                    # Get draft plan, task master catalogue, and tool registry
+                    draft_plan = session.get("draft_plan")
+                    if isinstance(draft_plan, str):
+                        draft_plan = json.loads(draft_plan) if draft_plan else {}
+                    
+                    # Load task master catalogue
+                    from nexus.modules.task_registry import task_registry
+                    task_master_catalogue = {}
+                    all_tasks = await task_registry.list_tasks({})
+                    for task in all_tasks:
+                        task_key = task.get("task_key")
+                        if task_key:
+                            task_master_catalogue[task_key] = task
+                    
+                    # Get tool registry
+                    from nexus.brains.planner import PlannerBrain
+                    planner_brain = PlannerBrain()
+                    tool_registry = await planner_brain._get_available_tools()
+                    
+                    # Handle user message in bounded plan flow
+                    controller_output = await self.bounded_plan_brain.handle_user_message(
+                        session_state=session_state,
+                        user_message=message,
+                        user_id=user_id,
+                        draft_plan=draft_plan,
+                        task_master_catalogue=task_master_catalogue,
+                        tool_registry=tool_registry
+                    )
+                    
+                    # Format and emit response
+                    response_text = controller_output.message
+                    if controller_output.question:
+                        response_text += f"\n\n{controller_output.question}"
+                    
+                    await orchestrator._format_emit_and_persist(
+                        agent=agent,
+                        raw_content=response_text,
+                        user_id=user_id,
+                        session_id=session_id,
+                        context={
+                            "operation": "bounded_plan_message",
+                            "source": "planning_phase_brain",
+                            "system_generated": True
+                        }
+                    )
+                    
+                    return {
+                        "status": controller_output.plan_readiness.lower().replace("_", " "),
+                        "message": controller_output.message,
+                        "question": controller_output.question,
+                        "plan_readiness": controller_output.plan_readiness
+                    }
+                except Exception as e:
+                    logger.error(f"[PlanningPhaseBrain.handle_message] Bounded plan handling failed: {e}", exc_info=True)
+                    # Fallback to old flow
+                    pass
+            
+            # Fallback to old guide_plan_to_implementable flow (for backward compatibility)
             try:
                 guidance_result = await self.guide_plan_to_implementable(
                     session_id=session_id,
@@ -333,30 +403,71 @@ What would you like to do next?"""
         async def on_decision(button_id: str, decision_value: str) -> Dict[str, Any]:
             """Handle decision-specific logic."""
             if decision_value == "create_new":
-                # Trigger plan implementation guidance immediately after decision
+                # Start bounded plan session
                 try:
-                    guidance_result = await self.guide_plan_to_implementable(
+                    logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] STARTING_BOUNDED_PLAN | session_id={session_id}")
+                    
+                    # Get draft plan, task master catalogue, and tool registry
+                    session = await self._get_session(session_id)
+                    if not session:
+                        raise ValueError(f"Session {session_id} not found")
+                    
+                    draft_plan = session.get("draft_plan")
+                    if isinstance(draft_plan, str):
+                        draft_plan = json.loads(draft_plan) if draft_plan else {}
+                    
+                    if not draft_plan:
+                        raise ValueError("No draft plan found in session")
+                    
+                    # Load task master catalogue
+                    from nexus.modules.task_registry import task_registry
+                    task_master_catalogue = {}
+                    # Get all tasks from catalog (simplified - in production, filter by domain)
+                    all_tasks = await task_registry.list_tasks({})
+                    for task in all_tasks:
+                        task_key = task.get("task_key")
+                        if task_key:
+                            task_master_catalogue[task_key] = task
+                    
+                    # Get tool registry
+                    from nexus.brains.planner import PlannerBrain
+                    planner_brain = PlannerBrain()
+                    tool_registry = await planner_brain._get_available_tools()
+                    
+                    logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] LOADED_CONTEXT | draft_plan_gates={len(draft_plan.get('gates', []))}, tasks={len(task_master_catalogue)}, tools={len(tool_registry)}")
+                    
+                    # Start bounded plan session
+                    session_state = await self.bounded_plan_brain.start_session(
                         session_id=session_id,
-                        user_id=user_id,
-                        user_message=None  # Initial assessment
+                        draft_plan=draft_plan,
+                        task_master_catalogue=task_master_catalogue,
+                        tool_registry=tool_registry,
+                        initial_known_fields=None
                     )
                     
-                    # Format response through conversational agent
-                    if guidance_result["conversation_state"] == "complete":
-                        response = "Your workflow plan is now fully implementable. All steps have owners, execution modes, and failure handling defined."
-                    elif guidance_result["next_question"]:
-                        response = guidance_result["next_question"]
+                    logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] BOUNDED_PLAN_STARTED | known_fields={len(session_state.known_fields)}")
+                    
+                    # Get initial message from presenter
+                    if session_state.last_bound_plan_spec:
+                        presenter_result = await self.bounded_plan_brain._call_presenter_llm(
+                            bound_plan_spec=session_state.last_bound_plan_spec,
+                            session_id=session_id,
+                            user_id=user_id
+                        )
+                        response = presenter_result.get("message", "I'm analyzing your workflow plan. Let me identify what information I need.")
+                        question = presenter_result.get("question")
                     else:
-                        response = "Let me analyze your plan to ensure it's implementable..."
+                        response = "I'm analyzing your workflow plan. Let me identify what information I need."
+                        question = None
                     
                     # Emit the response message
                     await orchestrator._format_emit_and_persist(
                         agent=agent,
-                        raw_content=response,
+                        raw_content=response + (f"\n\n{question}" if question else ""),
                         user_id=user_id,
                         session_id=session_id,
                         context={
-                            "operation": "plan_implementation_guidance",
+                            "operation": "bounded_plan_start",
                             "source": "planning_phase_brain",
                             "system_generated": True
                         }
@@ -365,11 +476,12 @@ What would you like to do next?"""
                     return {
                         "status": "success",
                         "message": response,
-                        "next_step": "plan_refinement",
-                        "implementation_status": guidance_result["implementation_status"]
+                        "question": question,
+                        "next_step": "bounded_plan",
+                        "plan_readiness": session_state.last_bound_plan_spec.get("plan_readiness") if session_state.last_bound_plan_spec else "NEEDS_INPUT"
                     }
                 except Exception as e:
-                    logger.error(f"[PlanningPhaseBrain.handle_build_reuse_decision] Guidance failed: {e}", exc_info=True)
+                    logger.error(f"[PlanningPhaseBrain.handle_build_reuse_decision] Bounded plan start failed: {e}", exc_info=True)
                     # Fallback message
                     return {
                         "status": "success",

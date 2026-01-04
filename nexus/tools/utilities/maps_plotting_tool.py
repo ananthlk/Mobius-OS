@@ -68,3 +68,4 @@ class MapsPlottingTool(NexusTool):
             "note": "This is a mock implementation. Integrate with Google Maps API for production use."
         }
 
+

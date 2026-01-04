@@ -45,3 +45,4 @@ async def apply_migration():
 if __name__ == "__main__":
     asyncio.run(apply_migration())
 
+

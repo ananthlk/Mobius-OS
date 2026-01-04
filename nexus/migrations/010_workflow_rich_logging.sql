@@ -48,4 +48,4 @@ CREATE TABLE IF NOT EXISTS llm_trace_logs (
 -- 3. Execution Links
 -- Links the execution of a recipe back to the session that created it
 ALTER TABLE workflow_executions 
-ADD COLUMN shaping_session_id INTEGER REFERENCES shaping_sessions(id);
+ADD COLUMN IF NOT EXISTS shaping_session_id INTEGER REFERENCES shaping_sessions(id);

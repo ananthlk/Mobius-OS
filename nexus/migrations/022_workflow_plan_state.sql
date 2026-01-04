@@ -119,3 +119,4 @@ COMMENT ON TABLE workflow_plan_phases IS 'Phases within a plan with status track
 COMMENT ON TABLE workflow_plan_steps IS 'Individual steps with tool configurations and agent enhancements';
 COMMENT ON TABLE workflow_plan_enhancements IS 'Audit trail of agent/user enhancements to steps';
 
+

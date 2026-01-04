@@ -566,6 +566,63 @@ class WorkflowOrchestrator(BaseOrchestrator):
             if "consultant_strategy" not in session:
                 session["consultant_strategy"] = "TABULA_RASA"
             
+            # Enhance transcript with memory_event_ids from OUTPUT events
+            try:
+                db = self._get_database()
+                transcript = session.get("transcript", [])
+                if transcript and isinstance(transcript, list):
+                    # Get OUTPUT memory_events for this session, ordered by created_at
+                    output_query = """
+                        SELECT id, payload, created_at
+                        FROM memory_events
+                        WHERE session_id = :sid AND bucket_type = 'OUTPUT'
+                        ORDER BY created_at ASC
+                    """
+                    output_events = await db.fetch_all(query=output_query, values={"sid": session_id})
+                    
+                    # Only enhance entries that don't already have memory_event_id (fallback for old entries)
+                    # New entries should already have memory_event_id set when created via emit()
+                    system_entries_needing_match = [e for e in transcript if isinstance(e, dict) and e.get("role") == "system" and "memory_event_id" not in e]
+                    
+                    if system_entries_needing_match:
+                        self.logger.debug(f"[ORCHESTRATOR] Fallback: Enhancing {len(system_entries_needing_match)} system messages without memory_event_id")
+                        
+                        # Simple positional matching for unmatched entries (fallback only)
+                        parsed_outputs = []
+                        for event in output_events:
+                            event_dict = dict(event)
+                            event_id = event_dict.get("id")
+                            payload = event_dict.get("payload", {})
+                            if isinstance(payload, str):
+                                import json
+                                try:
+                                    payload = json.loads(payload)
+                                except:
+                                    continue
+                            
+                            if isinstance(payload, dict) and payload.get("role") == "system":
+                                # Check if this OUTPUT event is already matched
+                                already_matched = any(
+                                    e.get("memory_event_id") == event_id 
+                                    for e in transcript 
+                                    if isinstance(e, dict) and "memory_event_id" in e
+                                )
+                                if not already_matched:
+                                    parsed_outputs.append({
+                                        "id": event_id,
+                                        "created_at": event_dict.get("created_at")
+                                    })
+                        
+                        # Match by position (simple fallback)
+                        parsed_outputs.sort(key=lambda x: x.get("created_at") or "")
+                        for i, transcript_entry in enumerate(system_entries_needing_match):
+                            if i < len(parsed_outputs):
+                                transcript_entry["memory_event_id"] = parsed_outputs[i]["id"]
+                                self.logger.debug(f"[ORCHESTRATOR] Fallback matched OUTPUT event {parsed_outputs[i]['id']} to transcript entry")
+            except Exception as e:
+                # Log but don't fail - memory_event_id is optional
+                self.logger.debug(f"Could not enhance transcript with memory_event_ids: {e}")
+            
             return session
         except Exception as e:
             await self._handle_error(e, {"operation": "get_session_state", "session_id": session_id}, session_id)
@@ -1206,15 +1263,18 @@ class WorkflowOrchestrator(BaseOrchestrator):
         
         agent = BaseAgent(session_id=session_id)
         
-        # Emit message immediately (Hot Path)
-        await agent.emit("OUTPUT", {"role": role, "content": content})
+        # Emit message immediately (Hot Path) and capture memory_event_id
+        memory_event_id = await agent.emit("OUTPUT", {"role": role, "content": content})
         
         # Get current transcript
         session = await self.shaping_manager.get_session(session_id)
         transcript = session.get("transcript", []) if session else []
         
-        # Append message
-        transcript.append({"role": role, "content": content, "timestamp": "now"})
+        # Append message with memory_event_id if available
+        transcript_entry = {"role": role, "content": content, "timestamp": "now"}
+        if memory_event_id:
+            transcript_entry["memory_event_id"] = memory_event_id
+        transcript.append(transcript_entry)
         
         # Persist transcript
         await database.execute(
@@ -1257,17 +1317,18 @@ class WorkflowOrchestrator(BaseOrchestrator):
         button_generated = context_dict.get("button_generated", False)
         skip_formatting = system_generated or button_generated
         
+        memory_event_id = None
         if skip_formatting:
             # For system/button-generated messages: emit directly without conversational agent
             logger.debug(f"[WorkflowOrchestrator._format_emit_and_persist] System/button-generated message - skipping conversational agent")
-            await agent.emit("OUTPUT", {"role": "system", "content": raw_content})
+            memory_event_id = await agent.emit("OUTPUT", {"role": "system", "content": raw_content})
             final_content = raw_content
         else:
             # For user-facing messages: format through conversational agent
             from nexus.modules.shaping_manager import shaping_manager
             
             # Format through conversational agent and emit OUTPUT (follows protocol)
-            await shaping_manager._format_and_emit_output(
+            memory_event_id = await shaping_manager._format_and_emit_output(
                 agent=agent,
                 raw_content=raw_content,
                 user_id=user_id,
@@ -1290,7 +1351,10 @@ class WorkflowOrchestrator(BaseOrchestrator):
         # Persist to transcript so it shows up in UI when frontend polls
         session = await self.shaping_manager.get_session(session_id)
         transcript = session.get("transcript", []) if session else []
-        transcript.append({"role": "system", "content": final_content, "timestamp": "now"})
+        transcript_entry = {"role": "system", "content": final_content, "timestamp": "now"}
+        if memory_event_id:
+            transcript_entry["memory_event_id"] = memory_event_id
+        transcript.append(transcript_entry)
         
         # Update transcript in database
         await database.execute(

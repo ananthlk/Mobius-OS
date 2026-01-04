@@ -31,10 +31,11 @@ class BaseAgent(ABC):
     async def emit(self, bucket: Literal["THINKING", "ARTIFACTS", "PERSISTENCE", "OUTPUT"], payload: Dict[str, Any]):
         """
         The unified event emitter.
+        Returns memory_event_id for OUTPUT events, None otherwise.
         """
         if not self.session_id:
             self.logger.warning(f"⚠️ Emit called without session_id. Payload: {payload}")
-            return
+            return None
 
         # 1. Path A: UI Stream (Hot)
         # We broadcast immediately to any connected websocket for this session
@@ -46,9 +47,16 @@ class BaseAgent(ABC):
         }
         await session_manager.broadcast(self.session_id, event_data)
         
-        # 2. Path B: Persistence (Cold)
-        # We spawn a background task so we don't block the agent loop
-        asyncio.create_task(self._persist_event(bucket, payload))
+        # 2. Path B: Persistence
+        # For OUTPUT events, await persistence to get memory_event_id for transcript linking
+        # For other events, use background task to avoid blocking
+        if bucket == "OUTPUT":
+            memory_event_id = await self._persist_event(bucket, payload)
+            return memory_event_id
+        else:
+            # Spawn background task for non-OUTPUT events
+            asyncio.create_task(self._persist_event(bucket, payload))
+            return None
         
         # 3. CRITICAL: If DRAFT_PLAN artifact, also persist to shaping_sessions.draft_plan
         if bucket == "ARTIFACTS" and payload.get("type") == "DRAFT_PLAN":
@@ -59,7 +67,7 @@ class BaseAgent(ABC):
             # Fire and forget the ParallelPlanner
             asyncio.create_task(self._notify_parallel_planner(payload))
 
-    async def _persist_event(self, bucket: str, payload: Dict[str, Any]):
+    async def _persist_event(self, bucket: str, payload: Dict[str, Any]) -> Optional[int]:
         """
         Internal: Async DB Insert.
         All bucket types are append-only to preserve full history:
@@ -67,23 +75,69 @@ class BaseAgent(ABC):
         - ARTIFACTS: All draft plan versions, workflow matches, etc.
         - PERSISTENCE: Complete audit trail
         - OUTPUT: Full conversation history
+        
+        For OUTPUT events, automatically emits feedback UI after persistence.
+        Returns memory_event_id for OUTPUT events, None otherwise.
         """
         try:
             # Convert any dataclass objects to dicts for JSON serialization
             serializable_payload = self._make_json_serializable(payload)
             
-            query = """
-            INSERT INTO memory_events (session_id, bucket_type, payload)
-            VALUES (:sid, :bucket, :payload)
-            """
-            await database.execute(query=query, values={
-                "sid": self.session_id,
-                "bucket": bucket,
-                "payload": json.dumps(serializable_payload)
-            })
+            # For OUTPUT events, we need the ID to emit feedback UI and return it for transcript linking
+            if bucket == "OUTPUT":
+                query = """
+                INSERT INTO memory_events (session_id, bucket_type, payload)
+                VALUES (:sid, :bucket, :payload)
+                RETURNING id
+                """
+                result = await database.fetch_one(query=query, values={
+                    "sid": self.session_id,
+                    "bucket": bucket,
+                    "payload": json.dumps(serializable_payload)
+                })
+                
+                # Emit feedback UI after OUTPUT event is persisted
+                if result and "id" in result:
+                    memory_event_id = result["id"]
+                    self.logger.debug(f"📝 OUTPUT event persisted with id={memory_event_id}, emitting feedback UI")
+                    asyncio.create_task(self._emit_feedback_ui(memory_event_id))
+                    return memory_event_id
+                else:
+                    self.logger.warning(f"⚠️ OUTPUT event persisted but no ID returned from database")
+                    return None
+            else:
+                # For other bucket types, use simple INSERT
+                query = """
+                INSERT INTO memory_events (session_id, bucket_type, payload)
+                VALUES (:sid, :bucket, :payload)
+                """
+                await database.execute(query=query, values={
+                    "sid": self.session_id,
+                    "bucket": bucket,
+                    "payload": json.dumps(serializable_payload)
+                })
+                return None
         except Exception as e:
             # We log but DO NOT crash the stream
             self.logger.error(f"❌ DB Persistence Failed for {bucket}: {e}")
+            return None
+    
+    async def _emit_feedback_ui(self, memory_event_id: int):
+        """
+        Internal: Automatically emit feedback UI artifact after OUTPUT event.
+        This makes feedback capture automatic and reusable across all agents.
+        """
+        try:
+            from nexus.core.feedback_builder import emit_feedback_ui
+            await emit_feedback_ui(
+                self,
+                memory_event_id,
+                metadata={"session_id": self.session_id}
+            )
+            self.logger.debug(f"✅ Emitted feedback UI for memory_event {memory_event_id}")
+        except Exception as e:
+            # Log but don't crash - feedback UI is optional
+            self.logger.warning(f"⚠️ Failed to emit feedback UI: {e}")
 
     async def _persist_draft_plan(self, payload: Dict[str, Any]):
         """

@@ -292,3 +292,23 @@ async def init_db():
         print("Migration 025 (Task Catalog) applied.")
     except Exception as e:
         print(f"Migration 025 Error: {e}")
+
+    # 030: Gmail OAuth Tokens
+    try:
+        sql = read_migration("030_gmail_oauth_tokens.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 030 (Gmail OAuth Tokens) applied.")
+    except Exception as e:
+        print(f"Migration 030 Error: {e}")
+
+    # 032: Message Feedback
+    try:
+        sql = read_migration("032_message_feedback.sql")
+        for stmt in sql.split(";"):
+            if stmt.strip():
+                await database.execute(stmt)
+        print("Migration 032 (Message Feedback) applied.")
+    except Exception as e:
+        print(f"Migration 032 Error: {e}")

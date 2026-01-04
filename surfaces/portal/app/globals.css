@@ -3,25 +3,129 @@
 @tailwind utilities;
 
 :root {
-  /* Google Material Palette */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --text-primary: #202124;
-  --text-secondary: #5f6368;
-  --primary-blue: #1a73e8;
+  /* Brand Colors - Möbius Gradient Palette */
   --brand-blue: #4285F4;
   --brand-red: #EA4335;
   --brand-yellow: #FBBC05;
   --brand-green: #34A853;
+  
+  /* Brand Color Variants */
+  --brand-blue-light: #e8f0fe;
+  --brand-blue-dark: #1967d2;
+  --brand-red-light: #fce8e6;
+  --brand-red-dark: #c5221f;
+  --brand-yellow-light: #fef7e0;
+  --brand-yellow-dark: #f9ab00;
+  --brand-green-light: #e6f4ea;
+  --brand-green-dark: #137333;
+
+  /* Primary Colors */
+  --primary-blue: #1a73e8;
+  --primary-blue-light: #e8f0fe;
+  --primary-blue-dark: #1557b0;
+  
+  /* Accent Colors (alias for consistency) */
+  --accent-blue: var(--primary-blue);
+  --accent-blue-soft: var(--primary-blue-light);
+
+  /* Background Colors */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #f1f3f4;
+  
+  /* Text Colors */
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --text-muted: #9aa0a6;
+  --text-disabled: #dadce0;
+  
+  /* Border Colors */
+  --border-subtle: #e0e0e0;
+  --border-medium: #dadce0;
+  --border-strong: #bdc1c6;
+  
+  /* Neutral Greys for Pattern Boards */
+  --grey-50: #fafafa;
+  --grey-100: #f5f5f5;
+  --grey-200: #eeeeee;
+  --grey-300: #e0e0e0;
+  --grey-400: #bdbdbd;
+  --grey-500: #9e9e9e;
+  --grey-600: #757575;
+  --grey-700: #616161;
+  --grey-800: #424242;
+  --grey-900: #212121;
+  
+  /* Spacing Scale (4px base) */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  
+  /* Typography Scale */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+  --font-size-5xl: 48px;
+  
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+  
+  --letter-spacing-tight: -0.02em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.05em;
+  
+  /* Border Radius Scale */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+  
+  /* Shadow System */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05);
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.08);
+  --shadow-float: 0 8px 30px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --bg-primary: #202124;
     --bg-secondary: #303134;
+    --bg-tertiary: #3c4043;
     --text-primary: #e8eaed;
     --text-secondary: #9aa0a6;
+    --text-muted: #80868b;
+    --text-disabled: #5f6368;
+    --border-subtle: #3c4043;
+    --border-medium: #5f6368;
+    --border-strong: #80868b;
     --primary-blue: #8ab4f8;
+    --primary-blue-light: #1a73e8;
+    --primary-blue-dark: #aecbfa;
   }
 }
 
@@ -155,4 +259,46 @@ body {
 .overflow-wrap-anywhere {
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* Pattern Board Utilities - Modern Grey Patterns */
+.pattern-board-light {
+  background-color: var(--bg-secondary);
+  background-image: 
+    radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.03) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.pattern-board-medium {
+  background-color: var(--grey-100);
+  background-image: 
+    radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.05) 1px, transparent 0);
+  background-size: 16px 16px;
+}
+
+.pattern-board-dark {
+  background-color: var(--grey-200);
+  background-image: 
+    radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.08) 1px, transparent 0);
+  background-size: 12px 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pattern-board-light {
+    background-color: var(--bg-secondary);
+    background-image: 
+      radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+  }
+  
+  .pattern-board-medium {
+    background-color: var(--bg-tertiary);
+    background-image: 
+      radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+  }
+  
+  .pattern-board-dark {
+    background-color: var(--grey-700);
+    background-image: 
+      radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.08) 1px, transparent 0);
+  }
 }

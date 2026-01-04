@@ -25,7 +25,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         },
         jwt({ token, user, account }) {
             if (user) {
-                token.id = user.id
+                // Store Google OAuth subject ID (unique user identifier)
+                // account.providerAccountId contains the Google subject ID
+                token.id = account?.providerAccountId || user.id || user.email
             }
             return token
         },

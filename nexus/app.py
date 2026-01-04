@@ -25,6 +25,12 @@ from nexus.modules.external_logging import router as external_router
 from nexus.modules.prompt_endpoints import router as prompt_router
 from nexus.modules.gate_endpoints import router as gate_router
 from nexus.modules.task_catalog_endpoints import router as task_catalog_router
+from nexus.modules.user_profile_endpoints import router as user_profile_router
+from nexus.modules.user_endpoints import router as user_router
+from nexus.modules.gmail_endpoints import router as gmail_router
+from nexus.modules.calendar_endpoints import router as calendar_router
+from nexus.modules.google_endpoints import router as google_router
+from nexus.modules.feedback_endpoints import router as feedback_router
 from nexus.modules.database import connect_to_db, disconnect_from_db, init_db
 from nexus.recipes.crm_recipes import register_crm_recipes
 
@@ -93,10 +99,16 @@ app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
 app.include_router(workflows_router)
 app.include_router(gate_router)  # Gate state management
 app.include_router(task_catalog_router)  # Task catalog management
+app.include_router(user_profile_router)  # User profile management (patient profiles)
+app.include_router(user_router)  # User account management
+app.include_router(gmail_router)  # Gmail OAuth and email management (legacy - use /api/google for unified)
+app.include_router(calendar_router)  # Calendar OAuth and calendar management (legacy - use /api/google for unified)
+app.include_router(google_router)  # Unified Google OAuth (Gmail + Calendar) - RECOMMENDED
 app.include_router(system_router)
 app.include_router(admin_router)
 app.include_router(external_router)  # External conversation logging
 app.include_router(prompt_router)  # Prompt management
+app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback"])
 from nexus.modules.activity import router as activity_router
 app.include_router(activity_router)
 

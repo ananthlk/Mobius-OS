@@ -51,41 +51,41 @@ export default function PlanStateDisplay({
         switch (status) {
             case 'completed':
             case 'user_approved':
-                return <CheckCircle size={16} className="text-green-600" />;
+                return <CheckCircle size={16} className="text-[var(--brand-green)]" />;
             case 'executing':
             case 'in_progress':
-                return <Play size={16} className="text-blue-600" />;
+                return <Play size={16} className="text-[var(--primary-blue)]" />;
             case 'ready':
             case 'tool_configured':
-                return <Clock size={16} className="text-yellow-600" />;
+                return <Clock size={16} className="text-[var(--brand-yellow)]" />;
             case 'failed':
-                return <XCircle size={16} className="text-red-600" />;
+                return <XCircle size={16} className="text-[var(--brand-red)]" />;
             case 'paused':
-                return <Pause size={16} className="text-gray-600" />;
+                return <Pause size={16} className="text-[var(--text-secondary)]" />;
             default:
-                return <AlertCircle size={16} className="text-gray-400" />;
+                return <AlertCircle size={16} className="text-[var(--text-muted)]" />;
         }
     };
 
     const getStatusBadge = (status: string) => {
         const colors = {
-            'completed': 'bg-green-100 text-green-800',
-            'user_approved': 'bg-blue-100 text-blue-800',
-            'executing': 'bg-blue-100 text-blue-800',
-            'in_progress': 'bg-blue-100 text-blue-800',
-            'ready': 'bg-yellow-100 text-yellow-800',
-            'tool_configured': 'bg-yellow-100 text-yellow-800',
-            'planned': 'bg-gray-100 text-gray-800',
-            'failed': 'bg-red-100 text-red-800',
-            'cancelled': 'bg-gray-100 text-gray-800'
+            'completed': 'bg-[var(--brand-green-light)] text-[var(--brand-green-dark)]',
+            'user_approved': 'bg-[var(--primary-blue-light)] text-[var(--primary-blue-dark)]',
+            'executing': 'bg-[var(--primary-blue-light)] text-[var(--primary-blue-dark)]',
+            'in_progress': 'bg-[var(--primary-blue-light)] text-[var(--primary-blue-dark)]',
+            'ready': 'bg-[var(--brand-yellow-light)] text-[var(--brand-yellow-dark)]',
+            'tool_configured': 'bg-[var(--brand-yellow-light)] text-[var(--brand-yellow-dark)]',
+            'planned': 'bg-[var(--bg-secondary)] text-[var(--text-primary)]',
+            'failed': 'bg-[var(--brand-red-light)] text-[var(--brand-red-dark)]',
+            'cancelled': 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
         };
-        return colors[status as keyof typeof colors] || 'bg-gray-100 text-gray-800';
+        return colors[status as keyof typeof colors] || 'bg-[var(--bg-secondary)] text-[var(--text-primary)]';
     };
 
     return (
         <div className="space-y-4">
             {/* Plan-level status */}
-            <div className="p-4 bg-white border-2 border-gray-200 rounded-lg">
+            <div className="p-4 bg-[var(--bg-primary)] border-2 border-[var(--border-subtle)] rounded-[var(--radius-lg)]">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         {getStatusIcon(planState.status)}
@@ -97,7 +97,7 @@ export default function PlanStateDisplay({
                     {planState.status === 'draft' && onApprove && planId && (
                         <button
                             onClick={() => onApprove(planId)}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            className="px-4 py-2 bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded-[var(--radius-md)] hover:bg-[var(--primary-blue-dark)]"
                         >
                             Approve Plan
                         </button>
@@ -119,7 +119,7 @@ export default function PlanStateDisplay({
                         {phase.status === 'planned' && onPhaseApprove && (
                             <button
                                 onClick={() => onPhaseApprove(phase.id)}
-                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                                className="px-3 py-1 text-sm bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded hover:bg-[var(--primary-blue-dark)]"
                             >
                                 Approve
                             </button>
@@ -132,10 +132,10 @@ export default function PlanStateDisplay({
                             <div
                                 key={step.id}
                                 className={`p-3 rounded border ${
-                                    step.status === 'completed' ? 'bg-green-50 border-green-200' :
-                                    step.status === 'executing' ? 'bg-blue-50 border-blue-200' :
-                                    step.status === 'failed' ? 'bg-red-50 border-red-200' :
-                                    'bg-gray-50 border-gray-200'
+                                    step.status === 'completed' ? 'bg-[var(--brand-green-light)] border-[var(--brand-green)]' :
+                                    step.status === 'executing' ? 'bg-[var(--primary-blue-light)] border-[var(--primary-blue)]' :
+                                    step.status === 'failed' ? 'bg-[var(--brand-red-light)] border-[var(--brand-red)]' :
+                                    'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'
                                 }`}
                             >
                                 <div className="flex items-start justify-between">
@@ -150,16 +150,16 @@ export default function PlanStateDisplay({
 
                                         {/* Tool configuration */}
                                         {step.tool && (
-                                            <div className="mt-2 p-2 bg-white rounded border border-gray-200">
+                                            <div className="mt-2 p-2 bg-[var(--bg-primary)] rounded border border-[var(--border-subtle)]">
                                                 <div className="flex items-center gap-2 mb-2">
-                                                    <Wrench size={14} className="text-blue-600" />
-                                                    <span className="text-sm font-medium text-blue-600">
+                                                    <Wrench size={14} className="text-[var(--primary-blue)]" />
+                                                    <span className="text-sm font-medium text-[var(--primary-blue)]">
                                                         {step.tool.tool_name}
                                                     </span>
                                                 </div>
                                                 
                                                 {Object.keys(step.tool.inputs).length > 0 && (
-                                                    <div className="text-xs text-gray-600 mb-1">
+                                                    <div className="text-xs text-[var(--text-secondary)] mb-1">
                                                         <strong>Inputs:</strong>
                                                         <ul className="ml-4 list-disc">
                                                             {Object.entries(step.tool.inputs).map(([key, value]) => (
@@ -170,7 +170,7 @@ export default function PlanStateDisplay({
                                                 )}
 
                                                 {Object.keys(step.tool.outputs).length > 0 && (
-                                                    <div className="text-xs text-gray-600">
+                                                    <div className="text-xs text-[var(--text-secondary)]">
                                                         <strong>Outputs:</strong>
                                                         <ul className="ml-4 list-disc">
                                                             {Object.entries(step.tool.outputs).map(([key, value]) => (
@@ -184,14 +184,14 @@ export default function PlanStateDisplay({
 
                                         {/* Agent enhancements */}
                                         {step.metadata?.enhanced_by_agents && step.metadata.enhanced_by_agents.length > 0 && (
-                                            <div className="mt-2 text-xs text-gray-500">
+                                            <div className="mt-2 text-xs text-[var(--text-secondary)]">
                                                 Enhanced by: {step.metadata.enhanced_by_agents.join(', ')}
                                             </div>
                                         )}
 
                                         {/* Execution error */}
                                         {step.metadata?.execution_error && (
-                                            <div className="mt-2 text-xs text-red-600">
+                                            <div className="mt-2 text-xs text-[var(--brand-red)]">
                                                 Error: {step.metadata.execution_error}
                                             </div>
                                         )}
@@ -200,7 +200,7 @@ export default function PlanStateDisplay({
                                     {step.status === 'planned' && onStepApprove && (
                                         <button
                                             onClick={() => onStepApprove(step.id)}
-                                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                                            className="px-2 py-1 text-xs bg-[var(--primary-blue)] text-[var(--bg-primary)] rounded hover:bg-[var(--primary-blue-dark)]"
                                         >
                                             Approve
                                         </button>

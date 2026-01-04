@@ -295,13 +295,15 @@ class ShapingManager:
                 "message": f"Response formatted and ready (length: {len(formatted_content)} chars)"
             })
             
-            # Emit formatted OUTPUT
-            await agent.emit("OUTPUT", {"role": "system", "content": formatted_content})
+            # Emit formatted OUTPUT and return memory_event_id
+            memory_event_id = await agent.emit("OUTPUT", {"role": "system", "content": formatted_content})
+            return memory_event_id
             
         except Exception as e:
             logging.warning(f"Conversational agent formatting failed: {e}, using raw response")
             # Fallback: emit raw response if formatting fails
-            await agent.emit("OUTPUT", {"role": "system", "content": raw_content})
+            memory_event_id = await agent.emit("OUTPUT", {"role": "system", "content": raw_content})
+            return memory_event_id
 
     async def create_session(self, user_id: str, initial_query: str) -> int:
         """

@@ -19,3 +19,4 @@ COMMENT ON COLUMN user_communication_preferences.style IS 'Preferred communicati
 COMMENT ON COLUMN user_communication_preferences.engagement_level IS 'Preferred engagement level: engaging, formal, or neutral';
 
 
+

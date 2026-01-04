@@ -6,13 +6,13 @@ import MobiusIcon from "@/components/MobiusIcon";
 
 export default function Home() {
     return (
-        <main className="min-h-screen flex flex-col bg-[#ffffff] text-[#202124] relative overflow-hidden font-sans selection:bg-blue-100">
+        <main className="min-h-screen flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)] relative overflow-hidden font-sans selection:bg-blue-100">
 
             {/* Top Navigation - Minimal */}
             <nav className="absolute top-0 right-0 p-8 z-50">
                 <Link
                     href="/auth/signin"
-                    className="text-[14px] text-[#9aa0a6] hover:text-[#202124] font-medium transition-colors duration-200"
+                    className="text-[14px] text-[var(--text-muted)] hover:text-[var(--text-primary)] font-medium transition-colors duration-200"
                 >
                     Sign In
                 </Link>
@@ -32,7 +32,7 @@ export default function Home() {
                 </div>
 
                 {/* Hero Text */}
-                <h1 className="text-4xl md:text-5xl tracking-tight text-[#202124] mb-12 text-center">
+                <h1 className="text-4xl md:text-5xl tracking-tight text-[var(--text-primary)] mb-12 text-center">
                     <span className="font-semibold">Organize the</span> <span className="mobius-gradient-text font-bold">Continuum.</span>
                 </h1>
 
@@ -42,12 +42,12 @@ export default function Home() {
                         <input
                             type="text"
                             placeholder="Facilitating dignity and flow..."
-                            className="w-full h-[56px] px-6 py-4 bg-white rounded-xl border border-[#e0e0e0] text-[#202124] placeholder-gray-400 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.04)] hover:shadow-[0_15px_40px_rgba(0,0,0,0.08)] text-lg"
+                            className="w-full h-[56px] px-6 py-4 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/10 transition-all duration-300 shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-float)] text-lg"
                         />
                     </div>
 
                     {/* Status Indicator */}
-                    <div className="mt-3 ml-1 flex items-center gap-1.5 text-[#666] text-[12px] font-medium opacity-80">
+                    <div className="mt-3 ml-1 flex items-center gap-1.5 text-[var(--text-secondary)] text-[12px] font-medium opacity-80">
                         <Shield className="w-3 h-3" />
                         <span>Secure Channel</span>
                     </div>
@@ -57,7 +57,7 @@ export default function Home() {
                 <div className="mt-10">
                     <Link
                         href="/dashboard"
-                        className="group inline-flex items-center gap-2 text-sm font-medium text-[#5f6368] hover:text-[#1a73e8] transition-colors py-2 px-4"
+                        className="group inline-flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--primary-blue)] transition-colors py-2 px-4"
                     >
                         <span>Enter Continuum</span>
                         <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
@@ -68,15 +68,15 @@ export default function Home() {
 
             {/* Compliance Footer */}
             <footer className="flex-none py-6 w-full text-center">
-                <div className="text-[11px] text-[#999] uppercase tracking-wider font-medium flex items-center justify-center gap-4">
+                <div className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium flex items-center justify-center gap-4">
                     <span className="flex items-center gap-1.5">
                         <Shield className="w-3 h-3" />
                         HIPAA Compliant
                     </span>
-                    <span className="w-px h-3 bg-[#e0e0e0]"></span>
+                    <span className="w-px h-3 bg-[var(--border-subtle)]"></span>
                     <span>End-to-End Encrypted</span>
-                    <span className="w-px h-3 bg-[#e0e0e0]"></span>
-                    <span>© 2024 Mobius OS</span>
+                    <span className="w-px h-3 bg-[var(--border-subtle)]"></span>
+                    <span>© 2024 Möbius OS</span>
                 </div>
             </footer>
 

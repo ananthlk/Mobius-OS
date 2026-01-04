@@ -16,7 +16,9 @@ if not MASTER_KEY_B64:
 else:
     try:
         MASTER_KEY = base64.urlsafe_b64decode(MASTER_KEY_B64)
-        print(f"✅ Crypto Loaded MASTER_KEY: {MASTER_KEY_B64[:5]}...")
+        # Only print in debug mode or when explicitly requested
+        if os.getenv("MOBIUS_DEBUG_CRYPTO", "").lower() == "true":
+            print(f"✅ Crypto Loaded MASTER_KEY: {MASTER_KEY_B64[:5]}...")
     except Exception as e:
         raise ValueError(f"Invalid MOBIUS_MASTER_KEY format: {e}")
 

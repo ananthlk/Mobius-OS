@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Bot, User } from "lucide-react";
+import { Send, User } from "lucide-react";
+import { useSession } from "next-auth/react";
+import MobiusIcon from "@/components/MobiusIcon";
 import ThinkingContainer from "@/components/ThinkingContainer";
 import Tooltip from "@/components/Tooltip";
 import ActionButtons from "./ActionButtons";
+import FeedbackCapture from "@/components/FeedbackCapture";
 
 interface Message {
     id: string;
@@ -13,6 +16,11 @@ interface Message {
     thinkingMessages?: string[]; // Only for thinking role
     collapsed?: boolean; // For thinking containers (default: false while streaming, true when system responds)
     timestamp: number;
+    memoryEventId?: number; // For feedback linking
+    feedback?: {
+        rating: "thumbs_up" | "thumbs_down";
+        comment?: string | null;
+    } | null;
 }
 
 interface ShapingChatProps {
@@ -24,6 +32,7 @@ interface ShapingChatProps {
 }
 
 export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, sessionId, progressState }: ShapingChatProps) {
+    const { data: session } = useSession();
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [currentThinkingId, setCurrentThinkingId] = useState<string | null>(null); // Track active thinking container ID
@@ -31,6 +40,8 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
     const [explicitlyCollapsedIds, setExplicitlyCollapsedIds] = useState<Set<string>>(new Set()); // Track which thinking blocks are explicitly collapsed by user
     const [userOverriddenIds, setUserOverriddenIds] = useState<Set<string>>(new Set()); // Track containers user explicitly expanded after system collapse
     const [actionButtons, setActionButtons] = useState<any>(null);
+    const [feedbackUIs, setFeedbackUIs] = useState<Map<number, number>>(new Map()); // memory_event_id -> message index
+    const [latestSystemMessageId, setLatestSystemMessageId] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const isUserScrollingRef = useRef(false);
     const lastMessageCountRef = useRef(0);
@@ -194,6 +205,56 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                             // No action buttons in response - clear them (decision might have been made)
                             setActionButtons(null);
                         }
+                        
+                        // Check for FEEDBACK_UI artifacts and track them
+                        const feedbackUIArtifacts = data.artifacts && Array.isArray(data.artifacts)
+                            ? data.artifacts.filter((a: any) => a.type === 'FEEDBACK_UI')
+                            : [];
+                        
+                        // Load feedback for ALL system messages with memory_event_id (async, non-blocking)
+                        if (data.transcript && Array.isArray(data.transcript)) {
+                            const systemMessages = data.transcript.filter((t: any) => t.role === "system" && t.memory_event_id);
+                            if (systemMessages.length > 0) {
+                                console.log(`[ShapingChat] Loading feedback for ${systemMessages.length} system messages with memory_event_id`);
+                                // Load feedback asynchronously but don't block transcript update
+                                Promise.all(systemMessages.map(async (msg: any) => {
+                                    try {
+                                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                                        const user_id = session?.user?.id || "anonymous";
+                                        const feedbackRes = await fetch(`${apiUrl}/api/feedback/${msg.memory_event_id}?user_id=${user_id}`);
+                                        if (feedbackRes.ok) {
+                                            const feedback = await feedbackRes.json();
+                                            console.log(`[ShapingChat] Loaded feedback for memory_event_id=${msg.memory_event_id}:`, feedback);
+                                            return { memoryEventId: msg.memory_event_id, feedback };
+                                        } else if (feedbackRes.status === 404) {
+                                            // No feedback yet - that's OK
+                                            return { memoryEventId: msg.memory_event_id, feedback: null };
+                                        }
+                                    } catch (e) {
+                                        console.error(`[ShapingChat] Error loading feedback for memory_event_id=${msg.memory_event_id}:`, e);
+                                    }
+                                    return { memoryEventId: msg.memory_event_id, feedback: null };
+                                })).then(feedbackResults => {
+                                    console.log(`[ShapingChat] Feedback loading complete, updating ${feedbackResults.length} messages`);
+                                    // Update messages with feedback after loading
+                                    setMessages(prev => prev.map(msg => {
+                                        const feedbackResult = feedbackResults.find(fr => fr.memoryEventId === msg.memoryEventId);
+                                        if (feedbackResult) {
+                                            return { 
+                                                ...msg, 
+                                                feedback: feedbackResult.feedback ? {
+                                                    rating: feedbackResult.feedback.rating,
+                                                    comment: feedbackResult.feedback.comment
+                                                } : null
+                                            };
+                                        }
+                                        return msg;
+                                    }));
+                                });
+                            } else {
+                                console.log(`[ShapingChat] No system messages with memory_event_id found in transcript`);
+                            }
+                        }
 
                         // Update thinking container with thinking messages (if active and not collapsed)
                         if (data.latest_thought && currentThinkingId) {
@@ -252,7 +313,9 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 id: `poll_${idx}`,
                                 role: t.role as "system" | "user",
                                 content: t.content,
-                                timestamp: t.timestamp === "now" ? Date.now() : t.timestamp
+                                timestamp: t.timestamp === "now" ? Date.now() : t.timestamp,
+                                memoryEventId: t.memory_event_id, // Include memory_event_id if available
+                                feedback: null // Will be loaded separately
                             }));
 
                             // Separate thinking containers from regular messages
@@ -268,6 +331,12 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 !lastRegularMsg ||
                                 (lastRegularMsg.content !== lastTranscriptMsg.content)
                             );
+                            
+                            // Update latest system message ID - track the last system message from transcript
+                            if (lastTranscriptMsg?.role === "system") {
+                                // Use the transcript message's ID (it will be matched/merged with local message below)
+                                // We'll update this after messages are merged
+                            }
 
                             // If new system message arrived, collapse the active thinking container
                             if (hasNewSystemMsg && currentThinkingId) {
@@ -305,6 +374,12 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                     if (!result.find(m => m.id === updatedContainers[i].id)) {
                                         result.push(updatedContainers[i]);
                                     }
+                                }
+                                
+                                // Update latest system message ID after merging
+                                const lastSystemMsg = result.filter(m => m.role === "system").pop();
+                                if (lastSystemMsg) {
+                                    setLatestSystemMessageId(lastSystemMsg.id);
                                 }
                                 
                                 return result;
@@ -345,9 +420,15 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 );
                                 
                                 if (matchingLocalIdx >= 0) {
-                                    // Found a match - use transcript message (more authoritative) but preserve local ID if it's more recent
+                                    // Found a match - use transcript message (more authoritative) but preserve local ID and feedback
                                     matchedLocalIndices.add(matchingLocalIdx);
-                                    result.push(transcriptMsg);
+                                    const localMsg = regularMsgs[matchingLocalIdx];
+                                    result.push({
+                                        ...transcriptMsg,
+                                        id: localMsg.id, // Preserve local ID
+                                        feedback: localMsg.feedback, // Preserve feedback if loaded
+                                        memoryEventId: transcriptMsg.memoryEventId || localMsg.memoryEventId // Use transcript's memory_event_id if available
+                                    });
                                 } else {
                                     // No match found - this is a new message from backend
                                     result.push(transcriptMsg);
@@ -394,6 +475,12 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 }
                             }
                             
+                            // Update latest system message ID after merging
+                            const lastSystemMsg = result.filter(m => m.role === "system").pop();
+                            if (lastSystemMsg) {
+                                setLatestSystemMessageId(lastSystemMsg.id);
+                            }
+                            
                             return result;
                         });
                     }
@@ -438,10 +525,11 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
         if (sessionId) {
             try {
                 const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const user_id = session?.user?.id || "anonymous";
                 const res = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}/chat`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: input, user_id: "user_123" }),
+                    body: JSON.stringify({ message: input, user_id }),
                 });
 
                 await res.json();
@@ -473,13 +561,15 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
     };
 
     return (
-        <div className="flex flex-col h-full bg-white rounded-2xl shadow-md border-2 border-gray-300 overflow-hidden relative">
+        <div className="flex flex-col h-full bg-[var(--bg-primary)] rounded-2xl shadow-[var(--shadow-md)] border-2 border-[var(--border-medium)] overflow-hidden relative">
             {/* Header */}
-            <div className="p-4 border-b-2 border-gray-300 bg-gradient-to-b from-gray-50 to-white flex items-center gap-2 shadow-sm">
+            <div className="p-4 border-b-2 border-[var(--border-medium)] bg-gradient-to-b from-[var(--bg-secondary)] to-[var(--bg-primary)] flex items-center gap-2 shadow-sm">
                 <Tooltip content={progressState?.status === "PLANNING" ? "Planning Phase Agent - Review and refine your workflow plan" : "AI agent that helps define and shape your workflow problem through conversation"}>
-                    <Bot className="w-5 h-5 text-blue-600 cursor-help" />
+                    <div className="cursor-help">
+                        <MobiusIcon size={20} animated={false} />
+                    </div>
                 </Tooltip>
-                <span className="text-sm font-bold text-gray-700 uppercase tracking-wider">
+                <span className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     {progressState?.status === "PLANNING" ? "Planning Phase" : "Problem Shaping Agent"}
                 </span>
             </div>
@@ -557,15 +647,53 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                     }
 
                     // Render user/system messages - Match chat page styling
+                    const isLatestSystemMessage = msg.role === "system" && 
+                        latestSystemMessageId !== null && 
+                        msg.id === latestSystemMessageId;
+                    
                     return (
                     <div key={msg.id} className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[80%] md:max-w-[70%] rounded-[20px] px-6 py-4 text-[15px] leading-relaxed shadow-sm break-words overflow-wrap-anywhere ${msg.role === "user"
                             ? 'bg-[#E8F0FE] text-[#1f1f1f] rounded-tr-none' // User: Light Blue (Google User style)
-                            : 'bg-white border border-gray-100 text-[#1f1f1f] rounded-tl-none' // Assistant: White
+                            : 'bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-[var(--text-primary)] rounded-tl-none'
                             }`}>
                             {/* Render Markdown-lite (bolding) */}
                             {msg.content && (
                                 <div className="break-words overflow-wrap-anywhere" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') }} />
+                            )}
+                            
+                            {/* Render feedback capture for ALL system messages with memoryEventId */}
+                            {msg.role === "system" && msg.memoryEventId && (
+                                <FeedbackCapture
+                                    memoryEventId={msg.memoryEventId}
+                                    userId={session?.user?.id || "anonymous"}
+                                    isLatestMessage={isLatestSystemMessage}
+                                    existingFeedback={msg.feedback}
+                                    onFeedbackSubmitted={() => {
+                                        // Reload feedback for this specific message after submission
+                                        (async () => {
+                                            try {
+                                                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                                                const user_id = session?.user?.id || "anonymous";
+                                                const feedbackRes = await fetch(`${apiUrl}/api/feedback/${msg.memoryEventId}?user_id=${user_id}`);
+                                                if (feedbackRes.ok) {
+                                                    const feedback = await feedbackRes.json();
+                                                    // Update the message with new feedback
+                                                    setMessages(prev => prev.map(m => 
+                                                        m.memoryEventId === msg.memoryEventId 
+                                                            ? { ...m, feedback: feedback ? {
+                                                                rating: feedback.rating,
+                                                                comment: feedback.comment
+                                                            } : null }
+                                                            : m
+                                                    ));
+                                                }
+                                            } catch (e) {
+                                                console.error(`[ShapingChat] Error reloading feedback:`, e);
+                                            }
+                                        })();
+                                    }}
+                                />
                             )}
                         </div>
                     </div>
@@ -585,7 +713,7 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                     </div>
 
             {/* Input Area - Match chat page styling */}
-            <div className="p-4 md:p-6 border-t border-gray-100 bg-white">
+            <div className="p-4 md:p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
                 <div className="bg-[#F0F4F8] rounded-full flex items-center px-2 py-2 focus-within:bg-white focus-within:shadow-md focus-within:ring-1 focus-within:ring-gray-200 transition-all">
                     <textarea
                         value={input}

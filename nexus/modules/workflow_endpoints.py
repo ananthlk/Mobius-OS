@@ -1,12 +1,14 @@
 import logging
 import json
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from nexus.conductors.workflows.orchestrator import orchestrator
 from nexus.tools.crm.schedule_scanner import ScheduleScannerTool
 from nexus.tools.crm.risk_calculator import RiskCalculatorTool
 from nexus.modules.session_manager import session_manager
+from nexus.modules.database import database
+from nexus.modules.user_profile_events import track_workflow_interaction
 
 # Setup Logger
 logger = logging.getLogger("nexus.workflows")
@@ -203,7 +205,7 @@ async def get_journey_state_endpoint(session_id: int):
     return journey_state
 
 @router.post("/shaping/{session_id}/chat")
-async def shaping_chat(session_id: int, req: ChatRequest):
+async def shaping_chat(session_id: int, req: ChatRequest, background_tasks: BackgroundTasks):
     """
     Handles chat interaction within a specific shaping session.
     """
@@ -218,6 +220,42 @@ async def shaping_chat(session_id: int, req: ChatRequest):
             message=req.message,
             user_id=req.user_id
         )
+        
+        # Track profile interaction - get session details for context
+        try:
+            session_query = "SELECT consultant_strategy, workflow_name FROM shaping_sessions WHERE id = :session_id"
+            session_row = await database.fetch_one(session_query, {"session_id": session_id})
+            strategy = session_row.get("consultant_strategy") if session_row else None
+            workflow_name = session_row.get("workflow_name") if session_row else None
+        except Exception as e:
+            logger.warning(f"Failed to get session details for profile tracking: {e}")
+            strategy = None
+            workflow_name = None
+        
+        # Extract assistant response from result
+        assistant_response = ""
+        if isinstance(result, dict):
+            assistant_response = result.get("reply", result.get("message", result.get("content", str(result))))
+        elif isinstance(result, str):
+            assistant_response = result
+        else:
+            assistant_response = str(result)
+        
+        # Track workflow interaction
+        try:
+            await track_workflow_interaction(
+                auth_id=req.user_id,
+                user_message=req.message,
+                assistant_response=assistant_response,
+                session_id=session_id,
+                workflow_name=workflow_name,
+                strategy=strategy,
+                background_tasks=background_tasks,
+                metadata={"module": "workflow"}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to track workflow interaction: {e}", exc_info=True)
+        
         return result
     except Exception as e:
         logger.error(f"Failed to handle chat message: {e}")

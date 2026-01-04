@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-  <title>Mobius Spectacles</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Möbius Spectacles</title>
   <link rel="stylesheet" href="styles.css">
   <!-- Preload clean fonts if possible, or use system fonts -->
 </head>
@@ -14,27 +16,55 @@
     <header class="header">
       <div class="brand">
         <div class="logo-svg-container">
-          <svg viewBox="0 0 100 60" class="mobius-logo-svg">
+          <svg viewBox="0 0 100 60" class="mobius-logo-svg" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <linearGradient id="flow-sidepanel" x1="0%" y1="0%" x2="200%" y2="0%">
-                <stop offset="0%" stop-color="#4285F4" />
-                <stop offset="12.5%" stop-color="#EA4335" />
-                <stop offset="25%" stop-color="#FBBC05" />
-                <stop offset="37.5%" stop-color="#34A853" />
-                <stop offset="50%" stop-color="#4285F4" />
-                <stop offset="62.5%" stop-color="#EA4335" />
-                <stop offset="75%" stop-color="#FBBC05" />
-                <stop offset="87.5%" stop-color="#34A853" />
-                <stop offset="100%" stop-color="#4285F4" />
-                <animate attributeName="x1" from="0%" to="-100%" dur="4s" repeatCount="indefinite" />
-                <animate attributeName="x2" from="200%" to="100%" dur="4s" repeatCount="indefinite" />
+              <!-- Shadow filter for depth -->
+              <filter id="mobius-shadow-sidepanel" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceAlpha" stdDeviation="1.5"/>
+                <feOffset dx="1" dy="1" result="offsetblur"/>
+                <feComponentTransfer>
+                  <feFuncA type="linear" slope="0.3"/>
+                </feComponentTransfer>
+                <feMerge>
+                  <feMergeNode/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              
+              <!-- Top loop gray gradient -->
+              <linearGradient id="flow-sidepanel-1" x1="0%" y1="0%" x2="100%" y2="100%" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stop-color="#9e9e9e" />
+                <stop offset="33%" stop-color="#616161" />
+                <stop offset="66%" stop-color="#424242" />
+                <stop offset="100%" stop-color="#757575" />
+                <animate attributeName="x1" from="0%" to="100%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="y1" from="0%" to="100%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="x2" from="100%" to="0%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="y2" from="100%" to="0%" dur="4s" repeatCount="indefinite" />
+              </linearGradient>
+              
+              <!-- Bottom loop gray gradient - creates twist effect -->
+              <linearGradient id="flow-sidepanel-2" x1="100%" y1="0%" x2="0%" y2="100%" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stop-color="#757575" />
+                <stop offset="33%" stop-color="#424242" />
+                <stop offset="66%" stop-color="#616161" />
+                <stop offset="100%" stop-color="#9e9e9e" />
+                <animate attributeName="x1" from="100%" to="0%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="y1" from="0%" to="100%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="x2" from="0%" to="100%" dur="4s" repeatCount="indefinite" />
+                <animate attributeName="y2" from="100%" to="0%" dur="4s" repeatCount="indefinite" />
               </linearGradient>
             </defs>
-            <path d="M30 30 C30 15, 45 15, 50 30 C55 45, 70 45, 70 30 C70 15, 55 15, 50 30 C45 45, 30 45, 30 30"
-              stroke="url(#flow-sidepanel)" stroke-width="8" fill="none" stroke-linecap="round" />
+            
+            <!-- Infinity symbol path - top loop -->
+            <path d="M30 30 C30 15, 45 15, 50 30 C55 45, 70 45, 70 30"
+              stroke="url(#flow-sidepanel-1)" stroke-width="6" fill="none" stroke-linecap="round" filter="url(#mobius-shadow-sidepanel)" />
+            
+            <!-- Infinity symbol path - bottom loop (twisted) -->
+            <path d="M70 30 C70 15, 55 15, 50 30 C45 45, 30 45, 30 30"
+              stroke="url(#flow-sidepanel-2)" stroke-width="6" fill="none" stroke-linecap="round" filter="url(#mobius-shadow-sidepanel)" />
           </svg>
         </div>
-        <span class="brand-name">Mobius</span>
       </div>
       <div id="context-indicator" class="context-pill">
         <span class="status-dot"></span>
@@ -53,7 +83,7 @@
           </svg>
         </div>
         <div class="bubble">
-          Mobius is ready. Context: <span id="intro-context">None</span>.
+          Möbius is ready. Context: <span id="intro-context">None</span>.
         </div>
       </div>
       <!-- Dynamic Messages Go Here -->
@@ -77,6 +107,7 @@
     </footer>
 
   </div>
+  <script src="feedback.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 

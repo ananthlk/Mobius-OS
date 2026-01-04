@@ -67,3 +67,4 @@ class GenericLLMCallTool(NexusTool):
             "note": "This is a mock implementation. In production, integrate with nexus.modules.llm_gateway.gateway.chat_completion() (async method)."
         }
 
+

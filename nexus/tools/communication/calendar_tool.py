@@ -73,3 +73,4 @@ class PatientCalendarManager(NexusTool):
             "warning": "This is a mock implementation. Ensure patient consent before scheduling. Clinical appointments require approved systems."
         }
 
+

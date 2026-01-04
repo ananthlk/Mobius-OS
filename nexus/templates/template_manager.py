@@ -224,3 +224,4 @@ class TemplateManager:
 # Specialized instance for eligibility (can create others for different domains)
 eligibility_template_manager = TemplateManager(table_name="eligibility_plan_templates")
 
+
