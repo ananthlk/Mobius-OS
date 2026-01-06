@@ -23,3 +23,5 @@ COMMENT ON COLUMN shaping_sessions.planning_phase_approved IS 'Whether the workf
 COMMENT ON COLUMN shaping_sessions.planning_phase_approved_at IS 'Timestamp when plan was approved';
 
 
+
+

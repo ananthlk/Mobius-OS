@@ -19,3 +19,5 @@ CREATE TABLE IF NOT EXISTS gmail_oauth_tokens (
 CREATE INDEX IF NOT EXISTS idx_gmail_oauth_user_id ON gmail_oauth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_gmail_oauth_email ON gmail_oauth_tokens(email);
 
+
+

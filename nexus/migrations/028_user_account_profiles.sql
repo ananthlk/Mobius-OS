@@ -20,3 +20,5 @@ COMMENT ON COLUMN user_account_profiles.metadata IS 'Additional user metadata';
 -- Note: Communication preferences are already stored in user_communication_preferences table
 -- This table extends that functionality with additional preferences and settings
 
+
+

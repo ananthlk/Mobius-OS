@@ -60,3 +60,5 @@ COMMENT ON COLUMN llm_trace_logs.user_id IS 'User who triggered this LLM call';
 -- This allows backward compatibility with existing user_id strings from Google Auth
 -- Future migrations can normalize these to INTEGER foreign keys to users.id if desired
 
+
+

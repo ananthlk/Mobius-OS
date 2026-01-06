@@ -365,3 +365,5 @@ const fetchSessionLinks = async (userId: number, limit = 50) => {
 4. **Read-only Fields**: Query history profile is read-only and automatically populated
 5. **Session Links**: These are automatically created when workflow interactions occur
 
+
+

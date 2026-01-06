@@ -26,18 +26,19 @@ async def seed_prompt():
     await database.connect()
     
     try:
-        # Create the prompt
+        # Create the prompt using new API: module_name, domain, mode, step
         prompt_id = await prompt_manager.create_prompt(
             module_name="workflow",
+            domain="eligibility",
+            mode="TABULA_RASA",
+            step="clarification",  # Main TABULA_RASA prompt is for initial clarification
             prompt_config=prompt_config,
-            strategy="TABULA_RASA",
-            sub_level=None,
             description="TABULA_RASA strategy prompt for building workflows from scratch",
             user_context={"user_id": "system"}
         )
         
         print(f"✅ Successfully seeded TABULA_RASA prompt (ID: {prompt_id})")
-        print(f"   Key: workflow:TABULA_RASA:None")
+        print(f"   Key: workflow:eligibility:TABULA_RASA:clarification")
         
     except ValueError as e:
         if "already exists" in str(e):
@@ -52,6 +53,8 @@ async def seed_prompt():
 
 if __name__ == "__main__":
     asyncio.run(seed_prompt())
+
+
 
 
 

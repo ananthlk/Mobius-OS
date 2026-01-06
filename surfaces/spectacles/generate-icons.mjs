@@ -54,3 +54,5 @@ if (!fs.existsSync(svgPath)) {
 console.log('✅ icon.svg found');
 console.log('\nAfter generating the PNG files, the manifest.json will automatically use them.\n');
 
+
+

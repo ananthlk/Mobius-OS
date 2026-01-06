@@ -666,13 +666,21 @@ class WorkflowOrchestrator(BaseOrchestrator):
                 result = await self.shaping_manager.append_message(session_id, "user", message)
                 
                 if result:
+                    # Check if this is a stop message (workflow stopped)
+                    completion_status = result.get("completion_status", {})
+                    is_stopped = (
+                        completion_status.get("is_complete") == True and 
+                        completion_status.get("ready_for_handoff") == False
+                    )
+                    
                     await self._format_and_emit_response(
                         session_id=session_id,
                         user_id=user_id,
                         raw_message=result.get("raw_message", ""),
                         buttons=result.get("buttons"),
                         button_context=result.get("button_context"),
-                        button_metadata=result.get("button_metadata")
+                        button_metadata=result.get("button_metadata"),
+                        skip_formatting=is_stopped  # Skip formatting for stop messages
                     )
                 
                 # Check if gate phase just completed and user confirmed
@@ -1499,13 +1507,18 @@ class WorkflowOrchestrator(BaseOrchestrator):
         raw_message: str,
         buttons: Optional[List[Dict]] = None,
         button_context: Optional[str] = None,
-        button_metadata: Optional[Dict] = None
+        button_metadata: Optional[Dict] = None,
+        skip_formatting: bool = False
     ) -> None:
         """
         Centralized formatting and emission:
-        1. Format raw message through conversational agent
+        1. Format raw message through conversational agent (unless skip_formatting=True)
         2. Emit formatted OUTPUT
         3. Emit buttons (if any)
+        
+        Args:
+            skip_formatting: If True, use raw_message directly without conversational agent formatting
+                            (useful for stop messages that should be displayed as-is)
         """
         from nexus.core.base_agent import BaseAgent
         from nexus.brains.conversational_agent import conversational_agent
@@ -1526,20 +1539,42 @@ class WorkflowOrchestrator(BaseOrchestrator):
                 )
             return
         
-        # Format through conversational agent
-        try:
-            formatted_message = await conversational_agent.format_response(
-                raw_response=raw_message,
-                user_id=user_id,
-                context={"operation": "gate_response", "source": "gate_engine", "session_id": session_id}
-            )
-        except Exception as e:
-            self.logger.warning(f"Conversational agent formatting failed: {e}")
+        # Format through conversational agent (unless skip_formatting is True)
+        if skip_formatting:
+            # Use raw message directly for stop messages
             formatted_message = raw_message
+            self.logger.debug(f"[WorkflowOrchestrator._format_and_emit_response] Skipping formatting (stop message)")
+        else:
+            try:
+                formatted_message = await conversational_agent.format_response(
+                    raw_response=raw_message,
+                    user_id=user_id,
+                    context={"operation": "gate_response", "source": "gate_engine", "session_id": session_id}
+                )
+            except Exception as e:
+                self.logger.warning(f"Conversational agent formatting failed: {e}")
+                formatted_message = raw_message
         
         # Emit formatted OUTPUT
+        memory_event_id = None
         if formatted_message and formatted_message.strip():
-            await agent.emit("OUTPUT", {"role": "system", "content": formatted_message})
+            memory_event_id = await agent.emit("OUTPUT", {"role": "system", "content": formatted_message})
+        
+        # Persist to transcript so it shows up in UI when frontend polls
+        if formatted_message and formatted_message.strip():
+            session = await self.shaping_manager.get_session(session_id)
+            transcript = session.get("transcript", []) if session else []
+            transcript_entry = {"role": "system", "content": formatted_message, "timestamp": "now"}
+            if memory_event_id:
+                transcript_entry["memory_event_id"] = memory_event_id
+            transcript.append(transcript_entry)
+            
+            # Update transcript in database
+            await database.execute(
+                "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+                {"transcript": json.dumps(transcript), "id": session_id}
+            )
+            self.logger.debug(f"[WorkflowOrchestrator._format_and_emit_response] Message persisted to transcript")
         
         # Emit buttons if provided
         if buttons:

@@ -192,3 +192,5 @@ profile = await user_profile_manager.generate_synthetic_patient(
 4. **Deterministic:** Same scenario + name = same data every time
 5. **Comprehensive Coverage:** Tests all combinations of view availability
 
+
+

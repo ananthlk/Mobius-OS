@@ -189,10 +189,10 @@ class ShapingManager:
         # Map gate categories to user-friendly display labels
         GATE_DISPLAY_LABELS = {
             "1_patient_info_availability": {
-                "Yes": "I have name, DOB, and insurance details",
-                "No": "I do not have any patient information",
-                "Partial": "I only have name and DOB, no insurance info",
-                "Unknown": "I'm not sure what information is available"
+                "Yes": "Yes - I have name + DOB or insurance information",
+                "No": "No - I do not have either name+DOB or insurance",
+                "Partial": "Partial - I have one of name+DOB or insurance (but not both)",
+                "Unknown": "Unknown - not sure what information is available"
             }
             # Add more mappings as needed for other gates
         }
@@ -851,6 +851,66 @@ class ShapingManager:
                 await self._save_gate_state(session_id, reset_gate_state)
                 # Continue with gate execution to process the change
         
+        # CRITICAL: Check if this is gate 1 and user clicked "No" or "Unknown" - stop BEFORE LLM call
+        # This prevents unnecessary LLM calls and ensures immediate stop
+        current_gate = previous_state.status.next_gate if previous_state else gate_config.gate_order[0] if gate_config.gate_order else None
+        user_input = transcript[-1]['content'].strip() if transcript else ""
+        
+        if current_gate == "1_patient_info_availability" and user_input:
+            user_input_lower = user_input.lower().strip()
+            # Check if user directly clicked "No" or "Unknown" button
+            if user_input_lower in ["no", "unknown"] or user_input in ["No", "Unknown"]:
+                logging.info(f"[SHAPING_MANAGER] Early stop detected: Gate 1, user input='{user_input}' - stopping before LLM call")
+                
+                # Create stop state immediately
+                from datetime import datetime
+                from nexus.core.gate_models import GateValue, GateState, StatusInfo
+                
+                stop_gates = previous_state.gates.copy() if previous_state else {}
+                stop_gates["1_patient_info_availability"] = GateValue(
+                    raw=user_input,
+                    classified=user_input if user_input in ["No", "Unknown"] else ("No" if user_input_lower == "no" else "Unknown"),
+                    confidence=1.0,
+                    collected_at=datetime.now()
+                )
+                
+                stop_state = GateState(
+                    summary="Cannot proceed: insufficient patient information available.",
+                    gates=stop_gates,
+                    status=StatusInfo(
+                        pass_=True,  # Mark as complete (but stopped)
+                        next_gate=None,  # No next gate
+                        next_query=None
+                    )
+                )
+                
+                # Save stop state
+                await self._save_gate_state(session_id, stop_state)
+                
+                # Format stop message
+                stop_message = (
+                    "I understand you don't have enough patient information to proceed.\n\n"
+                    "**To continue with eligibility verification, you'll need at least one of the following:**\n"
+                    "• Patient demographics: Name and Date of Birth, OR\n"
+                    "• Insurance information: Payer name, policy number, and group number\n\n"
+                    "**Current status:** You indicated you have neither patient demographics nor insurance information.\n\n"
+                    "Once you have this information, you can start a new eligibility check workflow."
+                )
+                
+                # Return early with stop message (skip LLM call entirely)
+                return {
+                    "raw_message": stop_message,
+                    "buttons": None,
+                    "button_context": None,
+                    "button_metadata": None,
+                    "completion_status": {
+                        "is_complete": True,
+                        "completion_reason": "insufficient_patient_info" if user_input_lower == "no" else "unknown_patient_info",
+                        "ready_for_handoff": False  # Don't hand off - workflow stopped
+                    },
+                    "gate_state": stop_state
+                }
+        
         # Execute gate
         await agent.emit("THINKING", {"message": "Executing gate engine..."})
         
@@ -864,7 +924,83 @@ class ShapingManager:
             conversation_history=transcript
         )
         
-        # Save updated gate state
+        # CRITICAL: Check if gate 1 = "No" or "Unknown" - stop the process immediately
+        # Check both classified value AND raw value (in case LLM failed to classify)
+        gate_1_value = gate_result.proposed_state.gates.get("1_patient_info_availability")
+        user_input = transcript[-1]['content'].strip() if transcript else ""
+        
+        # Determine if we should stop: check classified value OR raw value matches stop conditions
+        should_stop = False
+        stop_classification = None
+        
+        if gate_1_value:
+            # Check classified value first
+            if gate_1_value.classified in ["No", "Unknown"]:
+                should_stop = True
+                stop_classification = gate_1_value.classified
+            # Also check raw value if classification failed (LLM error)
+            elif gate_1_value.raw and gate_1_value.raw.strip().lower() in ["no", "unknown"]:
+                should_stop = True
+                stop_classification = gate_1_value.raw.strip()
+            # Also check direct user input (button click sends category directly)
+            elif user_input and user_input.strip() in ["No", "Unknown", "no", "unknown"]:
+                should_stop = True
+                stop_classification = user_input.strip()
+        
+        if should_stop:
+            stop_reason = "insufficient_patient_info" if stop_classification.lower() == "no" else "unknown_patient_info"
+            logging.info(f"[SHAPING_MANAGER] Gate 1 = '{stop_classification}' - stopping eligibility workflow")
+            
+            # Create stop state
+            stop_state = GateState(
+                summary=gate_result.proposed_state.summary or "Cannot proceed: insufficient patient information available.",
+                gates=gate_result.proposed_state.gates,
+                status=StatusInfo(
+                    pass_=True,  # Mark as complete (but stopped)
+                    next_gate=None,  # No next gate
+                    next_query=None
+                )
+            )
+            
+            # Save stop state
+            await self._save_gate_state(session_id, stop_state)
+            
+            # Override gate_result to reflect stop
+            from nexus.core.gate_models import ConsultantResult, GateDecision
+            gate_result = ConsultantResult(
+                decision=GateDecision.PASS_REQUIRED_GATES,
+                pass_=True,
+                next_gate=None,
+                next_question=None,
+                proposed_state=stop_state,
+                updated_gates=gate_result.updated_gates
+            )
+            
+            # Format stop message
+            stop_message = (
+                "I understand you don't have enough patient information to proceed.\n\n"
+                "**To continue with eligibility verification, you'll need at least one of the following:**\n"
+                "• Patient demographics: Name and Date of Birth, OR\n"
+                "• Insurance information: Payer name, policy number, and group number\n\n"
+                "**Current status:** You indicated you have neither patient demographics nor insurance information.\n\n"
+                "Once you have this information, you can start a new eligibility check workflow."
+            )
+            
+            # Return early with stop message
+            return {
+                "raw_message": stop_message,
+                "buttons": None,
+                "button_context": None,
+                "button_metadata": None,
+                "completion_status": {
+                    "is_complete": True,
+                    "completion_reason": stop_reason,
+                    "ready_for_handoff": False  # Don't hand off - workflow stopped
+                },
+                "gate_state": stop_state
+            }
+        
+        # Save updated gate state (only if we didn't stop)
         await self._save_gate_state(session_id, gate_result.proposed_state)
         
         # Get RAG data from session for planner context

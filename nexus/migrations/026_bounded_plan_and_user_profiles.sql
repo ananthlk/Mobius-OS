@@ -39,3 +39,5 @@ COMMENT ON COLUMN user_profiles.system_data IS 'Demographics, preferences, local
 COMMENT ON COLUMN user_profiles.health_plan_data IS 'Insurance carrier, member ID, coverage, benefits, eligibility';
 COMMENT ON COLUMN user_profiles.availability_flags IS 'Track which views are available/unavailable for testing scenarios';
 
+
+

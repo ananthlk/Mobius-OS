@@ -36,11 +36,37 @@ from nexus.recipes.crm_recipes import register_crm_recipes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # #region agent log
+    import json
+    import time
+    def _log_debug(session_id, run_id, hypothesis_id, location, message, data):
+        try:
+            log_path = "/Users/ananth/Personal AI Projects/Mobius OS/.cursor/debug.log"
+            with open(log_path, "a") as f:
+                f.write(json.dumps({
+                    "sessionId": session_id,
+                    "runId": run_id,
+                    "hypothesisId": hypothesis_id,
+                    "location": location,
+                    "message": message,
+                    "data": data,
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+        except:
+            pass
+    _log_debug("debug-session", "run1", "D", "app.py:38", "Application startup - lifespan entry", {})
+    # #endregion
     # Startup
     await connect_to_db()
+    # #region agent log
+    _log_debug("debug-session", "run1", "D", "app.py:40", "After connect_to_db, before init_db", {})
+    # #endregion
     # Migration Note: active migrations should be triggered via /api/system/migrate in prod
     # But for dev convenience we can keep init_db or move to migrations entirely.
     await init_db()
+    # #region agent log
+    _log_debug("debug-session", "run1", "D", "app.py:43", "After init_db", {})
+    # #endregion
     await register_crm_recipes() # Now async
     
     # Seed tool library if empty

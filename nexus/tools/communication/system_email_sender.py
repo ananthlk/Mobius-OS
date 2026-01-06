@@ -134,3 +134,5 @@ class SystemEmailSender(NexusTool):
             logger.error(f"Failed to send email from system account: {e}")
             raise ValueError(f"Failed to send email: {str(e)}")
 
+
+

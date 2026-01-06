@@ -179,3 +179,5 @@ async def mark_patient_unavailable(patient_id: str, request: MarkUnavailableRequ
         logger.error(f"[user_profile_endpoints.mark_patient_unavailable] ERROR | error={str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+

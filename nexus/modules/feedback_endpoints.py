@@ -142,3 +142,5 @@ async def get_all_feedback_for_event(memory_event_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving feedback: {str(e)}")
 
+
+

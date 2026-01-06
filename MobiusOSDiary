@@ -193,45 +193,62 @@ try:
                     try:
                         await database.connect()
                         
-                        # Get interactions since last diary run or last 24 hours
+                        # Get interactions ONLY after the last diary run (strictly after, not including)
                         last_run = data.get('last_run', '')
                         if last_run:
                             # Try to parse the timestamp
                             try:
                                 from datetime import datetime
                                 last_dt = datetime.fromisoformat(last_run.replace('Z', '+00:00'))
+                                # Use > instead of >= to exclude the exact timestamp
+                                # Only get interactions created AFTER the last run
                                 query = """
                                 SELECT role, content, created_at 
                                 FROM interactions 
-                                WHERE created_at >= :since
+                                WHERE created_at > :since
                                 ORDER BY created_at ASC 
-                                LIMIT 100
+                                LIMIT 200
                                 """
                                 interactions = await database.fetch_all(query, {"since": last_dt})
-                            except:
-                                # Fallback to 24 hours if parsing fails
+                            except Exception as parse_err:
+                                # If parsing fails, only get today's interactions
+                                from datetime import datetime, timezone
+                                today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                                 query = """
                                 SELECT role, content, created_at 
                                 FROM interactions 
-                                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                                WHERE created_at > :since
                                 ORDER BY created_at ASC 
-                                LIMIT 100
+                                LIMIT 200
                                 """
-                                interactions = await database.fetch_all(query)
+                                interactions = await database.fetch_all(query, {"since": today_start})
                         else:
-                            # No last run, get last 24 hours
+                            # No last run - only get today's interactions
+                            from datetime import datetime, timezone
+                            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                             query = """
                             SELECT role, content, created_at 
                             FROM interactions 
-                            WHERE created_at >= NOW() - INTERVAL '24 hours'
+                            WHERE created_at > :since
                             ORDER BY created_at ASC 
-                            LIMIT 100
+                            LIMIT 200
                             """
-                            interactions = await database.fetch_all(query)
+                            interactions = await database.fetch_all(query, {"since": today_start})
                         
                         if interactions and len(interactions) > 0:
                             conv_lines = []
-                            conv_lines.append("=== Development Session Transcript ===")
+                            conv_lines.append("=== Development Session Transcript (Since Last Diary Entry) ===")
+                            # Show timestamp range for context
+                            first_ts = interactions[0].get('created_at', '')
+                            last_ts = interactions[-1].get('created_at', '')
+                            if first_ts and last_ts:
+                                try:
+                                    first_str = first_ts.strftime('%Y-%m-%d %H:%M') if hasattr(first_ts, 'strftime') else str(first_ts)[:16]
+                                    last_str = last_ts.strftime('%Y-%m-%d %H:%M') if hasattr(last_ts, 'strftime') else str(last_ts)[:16]
+                                    conv_lines.append(f"Time range: {first_str} to {last_str}")
+                                except:
+                                    pass
+                            conv_lines.append("")
                             for inter in interactions:  # Already in chronological order
                                 role = inter['role'].replace('portal_', '').replace('_', ' ').title()
                                 content = inter['content']
@@ -249,7 +266,7 @@ try:
                                     conv_lines.append(f"\n{role}: {content}")
                             conv_lines.append("\n=== End of Transcript ===")
                             data['conversation_context'] = "\n".join(conv_lines)
-                            print(f"   ✓ Fetched {len(interactions)} interactions from database", file=sys.stderr)
+                            print(f"   ✓ Fetched {len(interactions)} interactions since last diary entry", file=sys.stderr)
                         
                         await database.disconnect()
                     except Exception as db_err:

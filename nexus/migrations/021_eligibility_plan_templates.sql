@@ -34,3 +34,5 @@ COMMENT ON COLUMN eligibility_plan_templates.template_config IS 'Contains phases
 COMMENT ON COLUMN eligibility_plan_templates.match_pattern IS 'Pattern to match gate states or context for this template';
 
 
+
+

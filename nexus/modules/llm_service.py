@@ -18,8 +18,8 @@ class LLMService:
         self.known_models = {
             "google_vertex": [
                 {
-                    "model_id": "gemini-1.5-flash", 
-                    "display_name": "Gemini 1.5 Flash", 
+                    "model_id": "gemini-2.0-flash", 
+                    "display_name": "Gemini 2.0 Flash", 
                     "description": "Ultra-fast, low-cost multimodal model. Best for high-volume tasks.",
                     "latency_tier": "fast",
                     "input_cost": 0.075, "output_cost": 0.30,
@@ -27,8 +27,17 @@ class LLMService:
                     "is_recommended": True
                 },
                 {
-                    "model_id": "gemini-1.5-pro", 
-                    "display_name": "Gemini 1.5 Pro", 
+                    "model_id": "gemini-2.5-flash", 
+                    "display_name": "Gemini 2.5 Flash", 
+                    "description": "Fast and efficient multimodal model with improved capabilities.",
+                    "latency_tier": "fast",
+                    "input_cost": 0.075, "output_cost": 0.30,
+                    "capabilities": ["vision", "audio", "json_mode"],
+                    "is_recommended": True
+                },
+                {
+                    "model_id": "gemini-2.5-pro", 
+                    "display_name": "Gemini 2.5 Pro", 
                     "description": "High reasoning capability. Best for complex instructions and coding.",
                     "latency_tier": "balanced",
                     "input_cost": 1.25, "output_cost": 5.00,
@@ -102,7 +111,7 @@ class LLMService:
                 for m in self.known_models[p_name]:
                     await self._upsert_model(p['id'], m)
                     
-            # 3. Dynamic Discovery (Vertex)
+            # 2. Dynamic Discovery (Vertex)
             if p['provider_type'] == 'vertex':
                 try:
                     dynamic_models = await self._fetch_vertex_models(p['id'], p_name)
@@ -110,6 +119,15 @@ class LLMService:
                         await self._upsert_model(p['id'], m)
                 except Exception as e:
                     logger.warning(f"Could not auto-sync Vertex models: {e}")
+            
+            # 3. Dynamic Discovery (OpenAI-compatible)
+            if p['provider_type'] == 'openai_compatible':
+                try:
+                    dynamic_models = await self._fetch_dynamic_models(p['id'], p_name)
+                    for m in dynamic_models:
+                        await self._upsert_model(p['id'], m)
+                except Exception as e:
+                    logger.warning(f"Could not auto-sync OpenAI-compatible models for {p_name}: {e}")
 
     async def _fetch_vertex_models(self, provider_id: int, provider_name: str):
         """
@@ -272,6 +290,7 @@ class LLMService:
     async def _fetch_dynamic_models(self, provider_id: int, provider_name: str) -> List[Dict]:
         """
         Connects to the provider and lists available models.
+        Uses OpenAI API: GET https://api.openai.com/v1/models
         """
         # 1. Fetch Config (Directly from DB to avoid circular dependency or missing methods)
         from nexus.modules.crypto import decrypt
@@ -295,46 +314,112 @@ class LLMService:
         api_key = secrets.get("api_key", "missing")
 
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        
+        # Call OpenAI API: GET /v1/models
         resp = await client.models.list()
         
         results = []
         import time
         
-        # Limit to 10 for performance if list is huge
-        models_to_check = resp.data[:10]
+        # Filter for chat models only (exclude TTS, audio, image-only, etc.)
+        # Common non-chat model patterns
+        non_chat_patterns = [
+            "tts", "audio", "realtime", "image", "whisper", 
+            "dall-e", "embedding", "moderation", "babbage", "davinci", "ada", "curie"
+        ]
         
-        for model in models_to_check:
-            # Benchmark
-            start_t = time.time()
-            try:
-                # Simple ping: "hi" usually triggers a short response
-                await client.chat.completions.create(
-                    model=model.id,
-                    messages=[{"role": "user", "content": "hi"}],
-                    max_tokens=1
-                )
-                duration = time.time() - start_t
-                latency_ms = int(duration * 1000)
-            except Exception as e:
-                logger.warning(f"Benchmark failed for {model.id}: {e}")
-                latency_ms = 9999
+        chat_models = []
+        for model in resp.data:
+            model_id_lower = model.id.lower()
+            # Skip deprecated/non-chat models
+            if any(pattern in model_id_lower for pattern in non_chat_patterns):
+                continue
+            # Focus on gpt-* models for OpenAI
+            if model_id_lower.startswith("gpt-") or "chat" in model_id_lower:
+                chat_models.append(model)
+        
+        # If no chat models found with filtering, use all models (fallback)
+        if not chat_models:
+            chat_models = resp.data
+        
+        logger.info(f"Found {len(chat_models)} chat models out of {len(resp.data)} total models for {provider_name}")
+        
+        # Process chat models (limit benchmarking for performance)
+        recommended_model_ids = ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo", "gpt-4o", "o1"]
+        
+        for model in chat_models:
+            model_id = model.id
+            model_id_lower = model_id.lower()
             
-            # Determine Tier
-            if latency_ms < 500: tier = "fast"
-            elif latency_ms < 2000: tier = "balanced"
-            else: tier = "complex"
+            # Only benchmark a subset for performance (prioritize recommended models)
+            should_benchmark = (
+                any(rec in model_id_lower for rec in recommended_model_ids) or
+                len(chat_models) <= 20  # Benchmark all if small list
+            )
             
-            results.append({
-                "model_id": model.id,
-                "display_name": model.id.replace("-", " ").title(),
-                "description": f"Latency: {latency_ms}ms",
-                "latency_tier": tier, 
-                "input_cost": 0.0,
+            latency_ms = None
+            if should_benchmark:
+                start_t = time.time()
+                try:
+                    # Simple ping: "hi" usually triggers a short response
+                    await client.chat.completions.create(
+                        model=model_id,
+                        messages=[{"role": "user", "content": "hi"}],
+                        max_tokens=1
+                    )
+                    duration = time.time() - start_t
+                    latency_ms = int(duration * 1000)
+                except Exception as e:
+                    # Silent skip for non-chat models or errors
+                    logger.debug(f"Benchmark skipped for {model_id}: {e}")
+            
+            # Determine Tier (default to balanced if not benchmarked)
+            if latency_ms is None:
+                tier = "balanced"
+            elif latency_ms < 500:
+                tier = "fast"
+            elif latency_ms < 2000:
+                tier = "balanced"
+            else:
+                tier = "complex"
+            
+            # Determine capabilities based on model name
+            capabilities = []
+            if "vision" in model_id_lower or "4o" in model_id_lower or "4-turbo" in model_id_lower:
+                capabilities.append("vision")
+            if "json" in model_id_lower or "turbo" in model_id_lower:
+                capabilities.append("json_mode")
+            if "4" in model_id_lower or "turbo" in model_id_lower:
+                capabilities.append("function_calling")
+            
+            # Check if recommended
+            is_recommended = any(rec in model_id_lower for rec in recommended_model_ids)
+            
+            # Create display name
+            display_name = model_id.replace("-", " ").title()
+            if "gpt-4o" in model_id_lower:
+                display_name = "GPT-4o"
+            elif "gpt-4-turbo" in model_id_lower:
+                display_name = "GPT-4 Turbo"
+            elif "gpt-3.5-turbo" in model_id_lower:
+                display_name = "GPT-3.5 Turbo"
+            
+            model_data = {
+                "model_id": model_id,
+                "display_name": display_name,
+                "description": f"OpenAI model (latency: {latency_ms}ms)" if latency_ms else "OpenAI model",
+                "latency_tier": tier,
+                "input_cost": 0.0,  # Costs can be updated separately
                 "output_cost": 0.0,
-                "capabilities": ["json_mode"] if "llama" in model.id.lower() else [],
-                "last_latency_ms": latency_ms,
-                "is_recommended": any(x in model.id.lower() for x in ["llama3", "mistral", "gemma", "phi", "mixtral"])
-            })
+                "capabilities": capabilities,
+                "is_recommended": is_recommended
+            }
+            
+            if latency_ms is not None:
+                model_data["last_latency_ms"] = latency_ms
+            
+            results.append(model_data)
+        
         return results
 
     async def _upsert_model(self, provider_id: int, model_data: Dict):
@@ -572,9 +657,9 @@ class LLMService:
         if not model_context:
             # Fallback for legacy calls (should be avoided)
             logger.warning("generate_text called without model_context! Using fallback.")
-            model_context = {"model_id": "gemini-1.5-flash", "source": "legacy_fallback"}
+            model_context = {"model_id": "gemini-2.5-flash", "source": "legacy_fallback"}
 
-        model_id = model_context.get("model_id", "gemini-1.5-flash")
+        model_id = model_context.get("model_id", "gemini-2.5-flash")
         source = model_context.get("source", "unknown")
         
         # Use provided generation_config, or fallback to defaults

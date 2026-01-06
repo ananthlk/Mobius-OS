@@ -46,19 +46,32 @@ async def seed_gate_prompt():
         )
         
         if existing:
-            # Update existing prompt
+            # Update existing prompt directly (to avoid UNIQUE constraint issue)
             print(f"📝 Updating existing prompt: {prompt_key}")
             print(f"   Current version: {existing.get('version', 'unknown')}")
             
-            prompt_id = await prompt_manager.update_prompt(
-                prompt_key=prompt_key,
-                prompt_config=prompt_config,
-                change_reason="Updated to 5 gates: added 2_insurance_history and renumbered gates",
-                user_context={"user_id": "system"}
-            )
+            # Direct update to avoid versioning issues with UNIQUE constraint
+            update_query = """
+                UPDATE prompt_templates 
+                SET prompt_config = :config,
+                    updated_at = CURRENT_TIMESTAMP,
+                    updated_by = :user
+                WHERE prompt_key = :key AND is_active = true
+                RETURNING id
+            """
             
-            print(f"✅ Successfully updated GATE prompt (ID: {prompt_id})")
-            print(f"   Key: {prompt_key}")
+            prompt_id = await database.fetch_val(update_query, {
+                "key": prompt_key,
+                "config": json.dumps(prompt_config),
+                "user": "system"
+            })
+            
+            if prompt_id:
+                print(f"✅ Successfully updated GATE prompt (ID: {prompt_id})")
+                print(f"   Key: {prompt_key}")
+            else:
+                print(f"⚠️  No rows updated - prompt may not be active")
+                raise Exception("Failed to update prompt - no rows affected")
             
             # Verify it was updated
             verify = await prompt_manager.get_prompt(

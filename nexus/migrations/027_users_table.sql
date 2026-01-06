@@ -25,3 +25,5 @@ COMMENT ON COLUMN users.email IS 'User email address (unique)';
 COMMENT ON COLUMN users.role IS 'User role: admin, user, or viewer';
 COMMENT ON COLUMN users.is_active IS 'Whether the user account is active';
 
+
+

@@ -20,3 +20,5 @@ CREATE INDEX IF NOT EXISTS idx_message_feedback_memory_event ON message_feedback
 -- Index for user feedback history
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_id ON message_feedback(user_id, created_at DESC);
 
+
+

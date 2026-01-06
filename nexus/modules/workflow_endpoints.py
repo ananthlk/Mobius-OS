@@ -124,7 +124,7 @@ class UpdateDraftPlanRequest(BaseModel):
 # --- Shaping Session Endpoints ---
 
 @router.post("/shaping/start")
-async def start_shaping(req: StartShapingRequest):
+async def start_shaping(req: StartShapingRequest, background_tasks: BackgroundTasks):
     """
     Starts a new shaping session OR matches to existing workflows (Diagnosis).
     Returns session_id and candidates.
@@ -139,6 +139,47 @@ async def start_shaping(req: StartShapingRequest):
             user_id=req.user_id,
             query=req.query
         )
+        
+        # Track initial query interaction
+        session_id = result.get("session_id")
+        if session_id:
+            try:
+                # Get session details for tracking
+                session_query = "SELECT consultant_strategy, transcript FROM shaping_sessions WHERE id = :session_id"
+                session_row = await database.fetch_one(session_query, {"session_id": session_id})
+                
+                if session_row:
+                    session_dict = dict(session_row)
+                    strategy = session_dict.get("consultant_strategy")
+                    workflow_name = None  # workflow_name is not stored in shaping_sessions, it's passed in metadata
+                    
+                    # Extract assistant response from transcript
+                    transcript = session_dict.get("transcript")
+                    assistant_response = ""
+                    if transcript:
+                        if isinstance(transcript, str):
+                            transcript = json.loads(transcript)
+                        # Get the first system message (assistant response)
+                        if isinstance(transcript, list) and len(transcript) > 1:
+                            for msg in transcript:
+                                if msg.get("role") == "system":
+                                    assistant_response = msg.get("content", "")
+                                    break
+                    
+                    # Track workflow interaction for initial query
+                    await track_workflow_interaction(
+                        auth_id=req.user_id,
+                        user_message=req.query,
+                        assistant_response=assistant_response or "Session started",
+                        session_id=session_id,
+                        workflow_name=workflow_name,
+                        strategy=strategy,
+                        background_tasks=background_tasks,
+                        metadata={"module": "workflow", "is_initial_query": True}
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to track initial workflow interaction: {e}", exc_info=True)
+        
         return result
     except Exception as e:
         logger.error(f"Failed to start shaping session: {e}")
@@ -223,10 +264,10 @@ async def shaping_chat(session_id: int, req: ChatRequest, background_tasks: Back
         
         # Track profile interaction - get session details for context
         try:
-            session_query = "SELECT consultant_strategy, workflow_name FROM shaping_sessions WHERE id = :session_id"
+            session_query = "SELECT consultant_strategy FROM shaping_sessions WHERE id = :session_id"
             session_row = await database.fetch_one(session_query, {"session_id": session_id})
             strategy = session_row.get("consultant_strategy") if session_row else None
-            workflow_name = session_row.get("workflow_name") if session_row else None
+            workflow_name = None  # workflow_name is not stored in shaping_sessions, it's passed in metadata
         except Exception as e:
             logger.warning(f"Failed to get session details for profile tracking: {e}")
             strategy = None
