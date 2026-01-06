@@ -42,19 +42,22 @@ async def lifespan(app: FastAPI):
     # #region agent log
     import json
     import time
+    import os
     def _log_debug(session_id, run_id, hypothesis_id, location, message, data):
         try:
-            log_path = "/Users/ananth/Personal AI Projects/Mobius OS/.cursor/debug.log"
-            with open(log_path, "a") as f:
-                f.write(json.dumps({
-                    "sessionId": session_id,
-                    "runId": run_id,
-                    "hypothesisId": hypothesis_id,
-                    "location": location,
-                    "message": message,
-                    "data": data,
-                    "timestamp": int(time.time() * 1000)
-                }) + "\n")
+            # Only log in development (when DEBUG_LOG_PATH is set)
+            log_path = os.getenv("DEBUG_LOG_PATH")
+            if log_path:
+                with open(log_path, "a") as f:
+                    f.write(json.dumps({
+                        "sessionId": session_id,
+                        "runId": run_id,
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000)
+                    }) + "\n")
         except:
             pass
     _log_debug("debug-session", "run1", "D", "app.py:38", "Application startup - lifespan entry", {})
