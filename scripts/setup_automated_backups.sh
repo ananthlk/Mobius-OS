@@ -66,3 +66,4 @@ echo ""
 echo "To list backups:"
 echo "  python scripts/backup_database.py --list"
 
+

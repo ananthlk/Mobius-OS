@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ArrowLeft, Users, Plus, Edit, Trash2, Shield, Mail, User as UserIcon, Eye, ChevronDown, ChevronRight } from "lucide-react";
 import { useSession } from "next-auth/react";
 
@@ -39,8 +40,11 @@ interface SessionLink {
 
 export default function ClientsPage() {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
+    const router = useRouter();
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [roleFilter, setRoleFilter] = useState<string>("");
@@ -68,6 +72,7 @@ export default function ClientsPage() {
     const fetchUsers = async () => {
         try {
             setLoading(true);
+            setError(null);
             const params = new URLSearchParams();
             if (roleFilter) params.append("role", roleFilter);
             params.append("active_only", activeOnly.toString());
@@ -88,6 +93,11 @@ export default function ClientsPage() {
             setUsers(Array.isArray(data) ? data : (data.users || []));
         } catch (error) {
             console.error("Error fetching users:", error);
+            if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
+                setError("Backend API unavailable. Please ensure the backend server is running at " + (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"));
+            } else {
+                setError("Failed to fetch users. Please try again later.");
+            }
         } finally {
             setLoading(false);
         }
@@ -197,9 +207,47 @@ export default function ClientsPage() {
         // Load user profiles for editing
         const profiles = await fetchUserProfiles(user.id);
         if (profiles) {
-            setProfileFormData(profiles);
+            // Normalize the data to ensure no empty objects
+            const normalizedProfiles = normalizeProfileData(profiles);
+            setProfileFormData(normalizedProfiles);
         }
     };
+
+    // Handle auth_id query parameter to auto-open user profile
+    useEffect(() => {
+        const authIdParam = searchParams.get('auth_id');
+        if (authIdParam && users.length > 0 && !editingUser) {
+            // Find user with matching auth_id
+            const matchingUser = users.find(user => user.auth_id === authIdParam);
+            if (matchingUser) {
+                // Open edit modal for the matching user (inline logic to avoid dependency issues)
+                const openUserModal = async () => {
+                    setEditingUser(matchingUser);
+                    setFormData({
+                        auth_id: matchingUser.auth_id,
+                        email: matchingUser.email,
+                        name: matchingUser.name || "",
+                        role: matchingUser.role,
+                        is_active: matchingUser.is_active
+                    });
+                    setEditTab("basic");
+                    // Expand the user row
+                    setExpandedUser(matchingUser.id);
+                    // Load user profiles for editing
+                    const profiles = await fetchUserProfiles(matchingUser.id);
+                    if (profiles) {
+                        // Normalize the data to ensure no empty objects
+                        const normalizedProfiles = normalizeProfileData(profiles);
+                        setProfileFormData(normalizedProfiles);
+                    }
+                    // Clean up URL by removing query parameter
+                    router.replace('/dashboard/admin/clients');
+                };
+                openUserModal();
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [users, searchParams, editingUser, router]);
 
     const closeModals = () => {
         setShowCreateModal(false);
@@ -209,30 +257,93 @@ export default function ClientsPage() {
         setEditTab("basic");
     };
 
+    // Helper function to filter out system fields from profile updates
+    const filterProfileUpdates = (profileType: string, updates: any): any => {
+        const systemFields = ['user_id', 'created_at', 'updated_at'];
+        const allowedFields: Record<string, string[]> = {
+            'basic': ['preferred_name', 'phone', 'mobile', 'alternate_email', 'timezone', 'locale', 'avatar_url', 'bio', 'metadata'],
+            'professional': ['job_title', 'department', 'organization', 'team_name', 'manager_id', 'employee_id', 'office_location', 'start_date', 'metadata'],
+            'communication': ['communication_style', 'tone_preference', 'prompt_style_id', 'preferred_language', 'response_format_preference', 'notification_preferences', 'engagement_level', 'metadata'],
+            'ai-preference': ['escalation_rules', 'autonomy_level', 'confidence_threshold', 'require_confirmation_for', 'preferred_model_preferences', 'feedback_preferences', 'preferred_strategy', 'strategy_preferences', 'task_category_preferences', 'task_domain_preferences', 'metadata']
+        };
+        
+        const allowed = allowedFields[profileType] || [];
+        const filtered: any = {};
+        
+        for (const [key, value] of Object.entries(updates || {})) {
+            // Skip system fields
+            if (systemFields.includes(key)) continue;
+            // Only include allowed fields
+            if (allowed.includes(key)) {
+                // Convert numbers to strings for phone/mobile if needed
+                if ((key === 'phone' || key === 'mobile') && typeof value === 'number') {
+                    filtered[key] = String(value);
+                } else {
+                    filtered[key] = value;
+                }
+            }
+        }
+        
+        return filtered;
+    };
+
     const handleUpdateProfile = async (profileType: string, updates: any) => {
         if (!editingUser) return;
+        
+        // Filter out system fields and only include allowed fields
+        const filteredUpdates = filterProfileUpdates(profileType, updates);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clients/page.tsx:253',message:'handleUpdateProfile ENTRY',data:{profileType,editingUserId:editingUser.id,updates:JSON.stringify(updates),filteredUpdates:JSON.stringify(filteredUpdates),updatesKeys:Object.keys(updates),filteredKeys:Object.keys(filteredUpdates)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A,B,C'})}).catch(()=>{});
+        // #endregion
         
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
             const endpoint = `/api/users/${editingUser.id}/profiles/${profileType}`;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clients/page.tsx:259',message:'BEFORE fetch request',data:{endpoint,apiUrl,userId:session?.user?.id,updatesPayload:JSON.stringify(filteredUpdates),originalUpdates:JSON.stringify(updates)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A,B,C'})}).catch(()=>{});
+            // #endregion
+            
             const response = await fetch(`${apiUrl}${endpoint}`, {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
                     "X-User-ID": session?.user?.id || ""
                 },
-                body: JSON.stringify(updates)
+                body: JSON.stringify(filteredUpdates)
             });
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clients/page.tsx:268',message:'AFTER fetch response',data:{status:response.status,statusText:response.statusText,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D'})}).catch(()=>{});
+            // #endregion
 
             if (!response.ok) {
                 const error = await response.json();
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clients/page.tsx:268',message:'Response NOT OK - error received',data:{status:response.status,error:JSON.stringify(error),errorDetail:error.detail},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+                // #endregion
                 throw new Error(error.detail || `Failed to update ${profileType} profile`);
             }
 
-            // Refresh profiles and update form data
-            const updatedProfiles = await fetchUserProfiles(editingUser.id);
-            if (updatedProfiles) {
-                setProfileFormData(updatedProfiles);
+            // Get the updated profile from the response (backend returns it)
+            const updatedProfile = await response.json();
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clients/page.tsx:322',message:'Response body received from update',data:{profileType,updatedProfile:JSON.stringify(updatedProfile),updatedProfileKeys:Object.keys(updatedProfile)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+
+            // Refresh all profiles to get the complete profile set
+            const allUpdatedProfiles = await fetchUserProfiles(editingUser.id);
+            if (allUpdatedProfiles) {
+                // Normalize the data to ensure no empty objects
+                const normalizedProfiles = normalizeProfileData(allUpdatedProfiles);
+                setProfileFormData(normalizedProfiles);
+                // Also update userProfiles so expanded view shows new data
+                setUserProfiles(prev => ({
+                    ...prev,
+                    [editingUser.id]: normalizedProfiles
+                }));
             }
             alert(`${profileType} profile updated successfully!`);
         } catch (error) {
@@ -252,6 +363,75 @@ export default function ClientsPage() {
             default:
                 return "bg-gray-100 text-gray-800 border-gray-200";
         }
+    };
+
+    // Helper function to safely get string value from profile field (handles objects)
+    const getStringValue = (value: any): string => {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string") return value;
+        if (typeof value === "object" && !Array.isArray(value)) {
+            // If it's an empty object, return empty string
+            if (Object.keys(value).length === 0) return "";
+            // Otherwise, try to stringify (shouldn't happen for string fields)
+            return String(value);
+        }
+        return String(value);
+    };
+
+    // Helper function to normalize profile data - convert empty objects to empty strings for string fields
+    const normalizeProfileData = (profiles: any) => {
+        if (!profiles) return profiles;
+        
+        // Normalize basic profile
+        if (profiles.basic) {
+            Object.keys(profiles.basic).forEach(key => {
+                if (typeof profiles.basic[key] === 'object' && profiles.basic[key] !== null && !Array.isArray(profiles.basic[key])) {
+                    // If it's an empty object, convert to empty string (for non-JSONB fields)
+                    if (Object.keys(profiles.basic[key]).length === 0 && key !== 'metadata') {
+                        profiles.basic[key] = "";
+                    }
+                }
+            });
+        }
+        
+        // Normalize professional profile
+        if (profiles.professional) {
+            Object.keys(profiles.professional).forEach(key => {
+                if (typeof profiles.professional[key] === 'object' && profiles.professional[key] !== null && !Array.isArray(profiles.professional[key])) {
+                    if (Object.keys(profiles.professional[key]).length === 0 && key !== 'metadata') {
+                        profiles.professional[key] = "";
+                    }
+                }
+            });
+        }
+        
+        // Normalize communication profile
+        if (profiles.communication) {
+            Object.keys(profiles.communication).forEach(key => {
+                if (typeof profiles.communication[key] === 'object' && profiles.communication[key] !== null && !Array.isArray(profiles.communication[key])) {
+                    if (Object.keys(profiles.communication[key]).length === 0 && key !== 'metadata' && key !== 'notification_preferences') {
+                        profiles.communication[key] = "";
+                    }
+                }
+            });
+        }
+        
+        // Normalize AI preference profile
+        if (profiles.ai_preference) {
+            Object.keys(profiles.ai_preference).forEach(key => {
+                if (typeof profiles.ai_preference[key] === 'object' && profiles.ai_preference[key] !== null && !Array.isArray(profiles.ai_preference[key])) {
+                    // Only normalize non-JSONB fields
+                    const jsonbFields = ['escalation_rules', 'require_confirmation_for', 'preferred_model_preferences', 
+                                        'feedback_preferences', 'strategy_preferences', 'task_category_preferences', 
+                                        'task_domain_preferences', 'metadata'];
+                    if (Object.keys(profiles.ai_preference[key]).length === 0 && !jsonbFields.includes(key)) {
+                        profiles.ai_preference[key] = "";
+                    }
+                }
+            });
+        }
+        
+        return profiles;
     };
 
     const fetchUserProfiles = async (userId: number) => {
@@ -295,8 +475,10 @@ export default function ClientsPage() {
                         console.warn("Failed to parse primary_workflows:", e);
                     }
                 }
-                setUserProfiles(prev => ({ ...prev, [userId]: profiles }));
-                return profiles;
+                // Normalize profile data to convert empty objects to empty strings
+                const normalizedProfiles = normalizeProfileData(profiles);
+                setUserProfiles(prev => ({ ...prev, [userId]: normalizedProfiles }));
+                return normalizedProfiles;
             }
             
             if (linksRes.ok) {
@@ -343,7 +525,7 @@ export default function ClientsPage() {
                         <div>
                             <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Client Management</h1>
                             <p className="text-sm text-[var(--text-secondary)] mt-1">Manage users and organizations</p>
-                        </div>
+            </div>
                     </div>
                     <button
                         onClick={() => setShowCreateModal(true)}
@@ -385,6 +567,19 @@ export default function ClientsPage() {
                 {loading ? (
                     <div className="flex items-center justify-center h-64">
                         <div className="text-[var(--text-secondary)]">Loading users...</div>
+                    </div>
+                ) : error ? (
+                    <div className="flex flex-col items-center justify-center h-64">
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
+                            <h3 className="text-red-800 font-semibold mb-2">Connection Error</h3>
+                            <p className="text-red-700 text-sm mb-4">{error}</p>
+                            <button
+                                onClick={() => fetchUsers()}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                            >
+                                Retry
+                            </button>
+                        </div>
                     </div>
                 ) : users.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-64">
@@ -733,7 +928,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Preferred Name</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.basic?.preferred_name || ""}
+                                                value={getStringValue(profileFormData.basic?.preferred_name)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     basic: { ...profileFormData.basic, preferred_name: e.target.value }
@@ -745,7 +940,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Phone</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.basic?.phone || ""}
+                                                value={getStringValue(profileFormData.basic?.phone)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     basic: { ...profileFormData.basic, phone: e.target.value }
@@ -757,7 +952,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Mobile</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.basic?.mobile || ""}
+                                                value={getStringValue(profileFormData.basic?.mobile)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     basic: { ...profileFormData.basic, mobile: e.target.value }
@@ -769,7 +964,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Timezone</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.basic?.timezone || ""}
+                                                value={getStringValue(profileFormData.basic?.timezone)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     basic: { ...profileFormData.basic, timezone: e.target.value }
@@ -796,7 +991,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Job Title</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.professional?.job_title || ""}
+                                                value={getStringValue(profileFormData.professional?.job_title)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     professional: { ...profileFormData.professional, job_title: e.target.value }
@@ -808,7 +1003,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Department</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.professional?.department || ""}
+                                                value={getStringValue(profileFormData.professional?.department)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     professional: { ...profileFormData.professional, department: e.target.value }
@@ -820,7 +1015,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Organization</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.professional?.organization || ""}
+                                                value={getStringValue(profileFormData.professional?.organization)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     professional: { ...profileFormData.professional, organization: e.target.value }
@@ -832,7 +1027,7 @@ export default function ClientsPage() {
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Team Name</label>
                                             <input
                                                 type="text"
-                                                defaultValue={profileFormData.professional?.team_name || ""}
+                                                value={getStringValue(profileFormData.professional?.team_name)}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     professional: { ...profileFormData.professional, team_name: e.target.value }
@@ -857,7 +1052,7 @@ export default function ClientsPage() {
                                         <div>
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Communication Style</label>
                                             <select
-                                                defaultValue={profileFormData.communication?.communication_style || "professional"}
+                                                value={getStringValue(profileFormData.communication?.communication_style) || "professional"}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     communication: { ...profileFormData.communication, communication_style: e.target.value }
@@ -873,7 +1068,7 @@ export default function ClientsPage() {
                                         <div>
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Tone Preference</label>
                                             <select
-                                                defaultValue={profileFormData.communication?.tone_preference || "balanced"}
+                                                value={getStringValue(profileFormData.communication?.tone_preference) || "balanced"}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     communication: { ...profileFormData.communication, tone_preference: e.target.value }
@@ -888,7 +1083,7 @@ export default function ClientsPage() {
                                         <div>
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Response Format</label>
                                             <select
-                                                defaultValue={profileFormData.communication?.response_format_preference || "structured"}
+                                                value={getStringValue(profileFormData.communication?.response_format_preference) || "structured"}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     communication: { ...profileFormData.communication, response_format_preference: e.target.value }
@@ -917,7 +1112,7 @@ export default function ClientsPage() {
                                         <div>
                                             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Autonomy Level</label>
                                             <select
-                                                defaultValue={profileFormData.ai_preference?.autonomy_level || "balanced"}
+                                                value={getStringValue(profileFormData.ai_preference?.autonomy_level) || "balanced"}
                                                 onChange={(e) => setProfileFormData({
                                                     ...profileFormData,
                                                     ai_preference: { ...profileFormData.ai_preference, autonomy_level: e.target.value }
@@ -978,7 +1173,7 @@ export default function ClientsPage() {
                                         className="px-4 py-2 border border-[var(--border-subtle)] rounded-lg text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                                     >
                                         Close
-                                    </button>
+                </button>
                                 </div>
                             </div>
                         )}

@@ -96,5 +96,3 @@ async def track_workflow_interaction(
         metadata=workflow_metadata
     )
 
-
-

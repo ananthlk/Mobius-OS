@@ -279,10 +279,35 @@ class UserManager:
         """Get user basic profile."""
         try:
             await self._ensure_profile_exists("user_basic_profiles", user_id)
-            query = "SELECT * FROM user_basic_profiles WHERE user_id = :user_id"
+            # Use COALESCE to convert NULL to empty string at database level for string fields
+            # This ensures we never get NULL values that could be serialized as {}
+            query = """
+                SELECT 
+                    user_id,
+                    COALESCE(preferred_name, '') as preferred_name,
+                    COALESCE(phone, '') as phone,
+                    COALESCE(mobile, '') as mobile,
+                    COALESCE(alternate_email, '') as alternate_email,
+                    COALESCE(timezone, '') as timezone,
+                    COALESCE(locale, '') as locale,
+                    COALESCE(avatar_url, '') as avatar_url,
+                    COALESCE(bio, '') as bio,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM user_basic_profiles 
+                WHERE user_id = :user_id
+            """
             row = await database.fetch_one(query, {"user_id": user_id})
             if row:
-                return {k: self._parse_jsonb(v) for k, v in dict(row).items()}
+                # Process the row - only parse JSONB for metadata field, others are already strings due to COALESCE
+                result = {}
+                for k, v in dict(row).items():
+                    if k == "metadata":
+                        result[k] = self._parse_jsonb(v)
+                    else:
+                        result[k] = v
+                return result
             return {"user_id": user_id}
         except Exception as e:
             logger.error(f"[UserManager.get_basic_profile] ERROR: {e}", exc_info=True)
@@ -292,9 +317,77 @@ class UserManager:
         """Update user basic profile."""
         try:
             await self._ensure_profile_exists("user_basic_profiles", user_id)
-            set_clauses = [f"{k} = :{k}" for k in updates.keys()]
+            
+            # Whitelist of allowed fields for basic profile (matches database schema)
+            ALLOWED_FIELDS = {
+                "preferred_name", "phone", "mobile", "alternate_email", 
+                "timezone", "locale", "avatar_url", "bio", "metadata"
+            }
+            
+            # Filter to only allowed fields and exclude system fields
+            filtered_updates = {}
+            for k, v in updates.items():
+                if k in ["updated_at", "created_at", "user_id"]:
+                    continue  # Skip system fields
+                if k not in ALLOWED_FIELDS:
+                    logger.warning(f"[UserManager.update_basic_profile] Ignoring unknown field: {k}")
+                    continue
+                if v is None:
+                    continue
+                # Convert empty dicts to None for optional string fields
+                if isinstance(v, dict) and len(v) == 0 and k != "metadata":
+                    logger.debug(f"[UserManager.update_basic_profile] Converting empty dict to None for field: {k}")
+                    continue  # Skip empty dicts for non-JSONB fields
+                filtered_updates[k] = v
+            
+            # Handle JSONB fields - serialize dict/list to JSON string BEFORE building query
+            values = {"user_id": user_id}
+            set_clauses = []
+            
+            for k, v in filtered_updates.items():
+                # Handle metadata (JSONB field) - always serialize dict/list to JSON string
+                if k == "metadata":
+                    if isinstance(v, (dict, list)):
+                        set_clauses.append(f"{k} = :{k}")
+                        values[k] = json.dumps(v)  # Serialize to JSON string
+                        logger.debug(f"[UserManager.update_basic_profile] Serialized metadata: {type(v).__name__} -> JSON string")
+                    elif isinstance(v, str):
+                        # Already a JSON string, use as-is
+                        set_clauses.append(f"{k} = :{k}")
+                        values[k] = v
+                    else:
+                        # Skip other types for metadata
+                        logger.warning(f"[UserManager.update_basic_profile] Skipping metadata with unexpected type: {type(v).__name__}")
+                else:
+                    # Regular field - check if it's a dict/list (shouldn't be, but be safe)
+                    if isinstance(v, (dict, list)):
+                        # Frontend might send objects for fields that should be primitives
+                        logger.warning(f"[UserManager.update_basic_profile] Non-JSONB field {k} has {type(v).__name__} value: {v}. Skipping this field.")
+                        continue  # Skip this field instead of raising an error
+                    # Regular field - add as-is (strings, numbers, booleans, etc.)
+                    set_clauses.append(f"{k} = :{k}")
+                    values[k] = v
+            
+            if not set_clauses:
+                # No fields to update except updated_at
+                return True
+            
+            # Verify all values are serialized (no dicts/lists except in JSON strings)
+            # This is a critical safety check - asyncpg cannot handle Python dicts/lists directly
+            for k, v in list(values.items()):  # Use list() to avoid modification during iteration
+                if k == "user_id":
+                    continue
+                if isinstance(v, (dict, list)):
+                    logger.error(f"[UserManager.update_basic_profile] CRITICAL: Found unserialized {type(v).__name__} for field {k}: {v}")
+                    logger.error(f"[UserManager.update_basic_profile] Values dict: {values}")
+                    logger.error(f"[UserManager.update_basic_profile] Set clauses: {set_clauses}")
+                    # Force serialize it as a last resort
+                    values[k] = json.dumps(v)
+                    logger.warning(f"[UserManager.update_basic_profile] Force-serialized field {k} as fallback")
+            
             query = f"UPDATE user_basic_profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
-            await database.execute(query, {"user_id": user_id, **updates})
+            logger.debug(f"[UserManager.update_basic_profile] Executing query with {len(values)} parameters: {list(values.keys())}")
+            await database.execute(query, values)
             return True
         except Exception as e:
             logger.error(f"[UserManager.update_basic_profile] ERROR: {e}", exc_info=True)
@@ -304,10 +397,34 @@ class UserManager:
         """Get user professional profile."""
         try:
             await self._ensure_profile_exists("user_professional_profiles", user_id)
-            query = "SELECT * FROM user_professional_profiles WHERE user_id = :user_id"
+            # Use COALESCE to convert NULL to empty string at database level for string fields
+            query = """
+                SELECT 
+                    user_id,
+                    COALESCE(job_title, '') as job_title,
+                    COALESCE(department, '') as department,
+                    COALESCE(organization, '') as organization,
+                    manager_id,
+                    COALESCE(team_name, '') as team_name,
+                    COALESCE(employee_id, '') as employee_id,
+                    COALESCE(office_location, '') as office_location,
+                    start_date,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM user_professional_profiles 
+                WHERE user_id = :user_id
+            """
             row = await database.fetch_one(query, {"user_id": user_id})
             if row:
-                return {k: self._parse_jsonb(v) for k, v in dict(row).items()}
+                # Process the row - only parse JSONB for metadata field
+                result = {}
+                for k, v in dict(row).items():
+                    if k == "metadata":
+                        result[k] = self._parse_jsonb(v)
+                    else:
+                        result[k] = v
+                return result
             return {"user_id": user_id}
         except Exception as e:
             logger.error(f"[UserManager.get_professional_profile] ERROR: {e}", exc_info=True)
@@ -317,9 +434,56 @@ class UserManager:
         """Update user professional profile."""
         try:
             await self._ensure_profile_exists("user_professional_profiles", user_id)
-            set_clauses = [f"{k} = :{k}" for k in updates.keys()]
+            
+            # Whitelist of allowed fields for professional profile (matches database schema)
+            ALLOWED_FIELDS = {
+                "job_title", "department", "organization", "manager_id", 
+                "team_name", "employee_id", "office_location", "start_date", "metadata"
+            }
+            
+            # Filter to only allowed fields and exclude system fields
+            filtered_updates = {}
+            for k, v in updates.items():
+                if k in ["updated_at", "created_at", "user_id"]:
+                    continue  # Skip system fields
+                if k not in ALLOWED_FIELDS:
+                    logger.warning(f"[UserManager.update_professional_profile] Ignoring unknown field: {k}")
+                    continue
+                if v is None:
+                    continue
+                # Convert empty dicts to None for optional fields
+                if isinstance(v, dict) and len(v) == 0 and k != "metadata":
+                    logger.debug(f"[UserManager.update_professional_profile] Converting empty dict to None for field: {k}")
+                    continue  # Skip empty dicts for non-JSONB fields
+                filtered_updates[k] = v
+            
+            # Handle JSONB fields - serialize dict/list to JSON string
+            values = {"user_id": user_id}
+            set_clauses = []
+            for k, v in filtered_updates.items():
+                if k == "metadata":
+                    # Serialize JSONB to string - PostgreSQL will handle type conversion
+                    if isinstance(v, (dict, list)):
+                        set_clauses.append(f"{k} = :{k}")
+                        values[k] = json.dumps(v)
+                    elif isinstance(v, str):
+                        # Already a string, use as-is
+                        set_clauses.append(f"{k} = :{k}")
+                        values[k] = v
+                else:
+                    # Regular field - check if it's a dict/list
+                    if isinstance(v, (dict, list)):
+                        logger.warning(f"[UserManager.update_professional_profile] Non-JSONB field {k} has {type(v).__name__} value. Skipping.")
+                        continue
+                    set_clauses.append(f"{k} = :{k}")
+                    values[k] = v
+            
+            if not set_clauses:
+                # No fields to update except updated_at
+                return True
+            
             query = f"UPDATE user_professional_profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
-            await database.execute(query, {"user_id": user_id, **updates})
+            await database.execute(query, values)
             return True
         except Exception as e:
             logger.error(f"[UserManager.update_professional_profile] ERROR: {e}", exc_info=True)
@@ -329,10 +493,33 @@ class UserManager:
         """Get user communication profile."""
         try:
             await self._ensure_profile_exists("user_communication_profiles", user_id)
-            query = "SELECT * FROM user_communication_profiles WHERE user_id = :user_id"
+            # Use COALESCE to convert NULL to empty string at database level for string fields
+            query = """
+                SELECT 
+                    user_id,
+                    COALESCE(communication_style, '') as communication_style,
+                    COALESCE(tone_preference, '') as tone_preference,
+                    prompt_style_id,
+                    COALESCE(preferred_language, '') as preferred_language,
+                    COALESCE(response_format_preference, '') as response_format_preference,
+                    notification_preferences,
+                    COALESCE(engagement_level, '') as engagement_level,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM user_communication_profiles 
+                WHERE user_id = :user_id
+            """
             row = await database.fetch_one(query, {"user_id": user_id})
             if row:
-                return {k: self._parse_jsonb(v) for k, v in dict(row).items()}
+                # Process the row - parse JSONB for notification_preferences and metadata
+                result = {}
+                for k, v in dict(row).items():
+                    if k in ["notification_preferences", "metadata"]:
+                        result[k] = self._parse_jsonb(v)
+                    else:
+                        result[k] = v
+                return result
             return {"user_id": user_id}
         except Exception as e:
             logger.error(f"[UserManager.get_communication_profile] ERROR: {e}", exc_info=True)
@@ -342,16 +529,50 @@ class UserManager:
         """Update user communication profile."""
         try:
             await self._ensure_profile_exists("user_communication_profiles", user_id)
-            # Handle JSONB fields specially
+            
+            # Whitelist of allowed fields for communication profile (matches database schema)
+            ALLOWED_FIELDS = {
+                "communication_style", "tone_preference", "prompt_style_id",
+                "preferred_language", "response_format_preference", 
+                "notification_preferences", "engagement_level", "metadata"
+            }
+            
+            # Filter to only allowed fields and exclude system fields
+            # Allow empty strings (""), but filter out None values
+            filtered_updates = {}
+            for k, v in updates.items():
+                if k in ["updated_at", "created_at", "user_id"]:
+                    continue  # Skip system fields
+                if k not in ALLOWED_FIELDS:
+                    logger.warning(f"[UserManager.update_communication_profile] Ignoring unknown field: {k}")
+                    continue
+                if v is None:
+                    continue  # Skip None, but allow empty strings
+                filtered_updates[k] = v
+            
+            # Handle JSONB fields specially, filter out updated_at
             set_clauses = []
             values = {"user_id": user_id}
-            for k, v in updates.items():
+            for k, v in filtered_updates.items():
                 if k in ["notification_preferences", "metadata"]:
-                    set_clauses.append(f"{k} = {k} || :{k}")
-                    values[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
+                    # JSONB fields - merge with existing
+                    if isinstance(v, (dict, list)):
+                        set_clauses.append(f"{k} = {k} || :{k}")
+                        values[k] = json.dumps(v)
+                    elif isinstance(v, str):
+                        set_clauses.append(f"{k} = {k} || :{k}")
+                        values[k] = v
                 else:
+                    # Regular field - check if it's a dict/list
+                    if isinstance(v, (dict, list)):
+                        logger.warning(f"[UserManager.update_communication_profile] Non-JSONB field {k} has {type(v).__name__} value. Skipping.")
+                        continue
                     set_clauses.append(f"{k} = :{k}")
                     values[k] = v
+            
+            if not set_clauses:
+                return True
+            
             query = f"UPDATE user_communication_profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
             await database.execute(query, values)
             return True
@@ -376,10 +597,12 @@ class UserManager:
         """Update user use case profile."""
         try:
             await self._ensure_profile_exists("user_use_case_profiles", user_id)
-            # All fields are JSONB, merge them
+            # All fields are JSONB, merge them, filter out updated_at
             set_clauses = []
             values = {"user_id": user_id}
             for k, v in updates.items():
+                if k == "updated_at":
+                    continue  # Skip updated_at to avoid duplicate assignment
                 set_clauses.append(f"{k} = {k} || :{k}")
                 values[k] = json.dumps(v) if isinstance(v, (dict, list)) else json.dumps([v])
             query = f"UPDATE user_use_case_profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
@@ -393,10 +616,40 @@ class UserManager:
         """Get user AI preference profile."""
         try:
             await self._ensure_profile_exists("user_ai_preference_profiles", user_id)
-            query = "SELECT * FROM user_ai_preference_profiles WHERE user_id = :user_id"
+            # Use COALESCE to convert NULL to empty string at database level for string fields
+            query = """
+                SELECT 
+                    user_id,
+                    escalation_rules,
+                    COALESCE(autonomy_level, '') as autonomy_level,
+                    confidence_threshold,
+                    require_confirmation_for,
+                    preferred_model_preferences,
+                    feedback_preferences,
+                    COALESCE(preferred_strategy, '') as preferred_strategy,
+                    strategy_preferences,
+                    task_category_preferences,
+                    task_domain_preferences,
+                    metadata,
+                    created_at,
+                    updated_at
+                FROM user_ai_preference_profiles 
+                WHERE user_id = :user_id
+            """
             row = await database.fetch_one(query, {"user_id": user_id})
             if row:
-                return {k: self._parse_jsonb(v) if isinstance(v, (dict, list)) else (float(v) if isinstance(v, type(row[k])) and k == "confidence_threshold" else v) for k, v in dict(row).items()}
+                # Process the row - parse JSONB for JSONB fields, handle confidence_threshold as float
+                result = {}
+                for k, v in dict(row).items():
+                    if k in ["escalation_rules", "require_confirmation_for", "preferred_model_preferences", 
+                             "feedback_preferences", "strategy_preferences", "task_category_preferences", 
+                             "task_domain_preferences", "metadata"]:
+                        result[k] = self._parse_jsonb(v)
+                    elif k == "confidence_threshold" and v is not None:
+                        result[k] = float(v)
+                    else:
+                        result[k] = v
+                return result
             return {"user_id": user_id}
         except Exception as e:
             logger.error(f"[UserManager.get_ai_preference_profile] ERROR: {e}", exc_info=True)
@@ -406,17 +659,56 @@ class UserManager:
         """Update user AI preference profile."""
         try:
             await self._ensure_profile_exists("user_ai_preference_profiles", user_id)
+            
+            # Whitelist of allowed fields for AI preference profile (matches database schema)
+            ALLOWED_FIELDS = {
+                "escalation_rules", "autonomy_level", "confidence_threshold",
+                "require_confirmation_for", "preferred_model_preferences",
+                "feedback_preferences", "preferred_strategy", "strategy_preferences",
+                "task_category_preferences", "task_domain_preferences", "metadata"
+            }
+            
+            # Filter to only allowed fields and exclude system fields
+            filtered_updates = {}
+            for k, v in updates.items():
+                if k in ["updated_at", "created_at", "user_id"]:
+                    continue  # Skip system fields
+                if k not in ALLOWED_FIELDS:
+                    logger.warning(f"[UserManager.update_ai_preference_profile] Ignoring unknown field: {k}")
+                    continue
+                if v is None:
+                    continue
+                # Convert empty dicts to None for optional fields
+                if isinstance(v, dict) and len(v) == 0 and k not in ["escalation_rules", "preferred_model_preferences", 
+                                                                      "feedback_preferences", "strategy_preferences",
+                                                                      "task_category_preferences", "task_domain_preferences", "metadata"]:
+                    continue  # Skip empty dicts for non-JSONB fields
+                filtered_updates[k] = v
+            
             set_clauses = []
             values = {"user_id": user_id}
-            for k, v in updates.items():
+            for k, v in filtered_updates.items():
                 if k in ["escalation_rules", "require_confirmation_for", "preferred_model_preferences", 
                         "feedback_preferences", "strategy_preferences", "task_category_preferences", 
                         "task_domain_preferences", "metadata"]:
-                    set_clauses.append(f"{k} = {k} || :{k}")
-                    values[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
+                    # JSONB fields - merge with existing
+                    if isinstance(v, (dict, list)):
+                        set_clauses.append(f"{k} = {k} || :{k}")
+                        values[k] = json.dumps(v)
+                    elif isinstance(v, str):
+                        set_clauses.append(f"{k} = {k} || :{k}")
+                        values[k] = v
                 else:
+                    # Regular field - check if it's a dict/list
+                    if isinstance(v, (dict, list)):
+                        logger.warning(f"[UserManager.update_ai_preference_profile] Non-JSONB field {k} has {type(v).__name__} value. Skipping.")
+                        continue
                     set_clauses.append(f"{k} = :{k}")
                     values[k] = v
+            
+            if not set_clauses:
+                return True
+            
             query = f"UPDATE user_ai_preference_profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
             await database.execute(query, values)
             return True
@@ -591,3 +883,13 @@ class UserManager:
 # Singleton instance
 user_manager = UserManager()
 
+# Compatibility shim: Import new services for gradual migration
+try:
+    from nexus.modules.users.services.user_service import UserService as NewUserService
+    from nexus.modules.users.services.profile_service import ProfileService as NewProfileService
+    _new_user_service = NewUserService()
+    _new_profile_service = NewProfileService()
+except ImportError:
+    # New module not available yet
+    _new_user_service = None
+    _new_profile_service = None

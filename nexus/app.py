@@ -26,7 +26,10 @@ from nexus.modules.prompt_endpoints import router as prompt_router
 from nexus.modules.gate_endpoints import router as gate_router
 from nexus.modules.task_catalog_endpoints import router as task_catalog_router
 from nexus.modules.user_profile_endpoints import router as user_profile_router
-from nexus.modules.user_endpoints import router as user_router
+# Legacy user endpoints - COMMENTED OUT due to route conflict with new module
+# from nexus.modules.user_endpoints import router as user_router
+# New refactored user module (replaces legacy user_endpoints)
+from nexus.modules.users.api import user_router as new_user_router, profile_router as new_profile_router
 from nexus.modules.gmail_endpoints import router as gmail_router
 from nexus.modules.calendar_endpoints import router as calendar_router
 from nexus.modules.google_endpoints import router as google_router
@@ -120,13 +123,16 @@ app.add_middleware(
 
 # Include Surface Routers
 app.include_router(spectacles_router, prefix="/api/spectacles", tags=["Spectacles"])
-app.include_router(spectacles_router, prefix="/api/spectacles", tags=["Spectacles"])
 app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
 app.include_router(workflows_router)
 app.include_router(gate_router)  # Gate state management
 app.include_router(task_catalog_router)  # Task catalog management
 app.include_router(user_profile_router)  # User profile management (patient profiles)
-app.include_router(user_router)  # User account management
+# Legacy user endpoints - COMMENTED OUT due to route conflict with new module
+# app.include_router(user_router)  # User account management (legacy)
+# New refactored user module (replaces legacy user_endpoints)
+app.include_router(new_user_router)  # New user CRUD endpoints
+app.include_router(new_profile_router)  # New user profile endpoints (includes compatibility routes)
 app.include_router(gmail_router)  # Gmail OAuth and email management (legacy - use /api/google for unified)
 app.include_router(calendar_router)  # Calendar OAuth and calendar management (legacy - use /api/google for unified)
 app.include_router(google_router)  # Unified Google OAuth (Gmail + Calendar) - RECOMMENDED

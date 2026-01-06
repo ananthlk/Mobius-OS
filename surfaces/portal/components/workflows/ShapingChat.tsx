@@ -173,6 +173,7 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
     // Polling Effect (The "Stream Listener")
     useEffect(() => {
         let interval: NodeJS.Timeout;
+        const lastGateKeyRef = { value: null as string | null }; // Use ref object to persist across closures
         if (sessionId) {
             interval = setInterval(async () => {
                 try {
@@ -180,10 +181,30 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                     const res = await fetch(`${apiUrl}/api/workflows/shaping/${sessionId}`);
                     const data = await res.json();
 
+                    // Extract current gate key from gate_state
+                    const currentGateKey = data.gate_state?.current_gate_key || null;
+                    
+                    // Skip button update if gate key hasn't changed (prevents showing stale state during processing)
+                    // Only skip if we've seen a gate key before (not on initial load) and gates are not complete
+                    const shouldSkipButtonUpdate = lastGateKeyRef.value !== null && 
+                                                   currentGateKey === lastGateKeyRef.value && 
+                                                   data.gates_complete === false;
+                    
+                    // Always update transcript and pass to parent
                     if (data.transcript && Array.isArray(data.transcript)) {
                         // Pass full state up to parent (for Left Rail sync)
                         if (onSessionUpdate) onSessionUpdate(data);
-                        
+                    }
+                    
+                    // Skip button update if gate key unchanged (still processing)
+                    if (shouldSkipButtonUpdate) {
+                        return; // Skip button update to avoid showing stale buttons
+                    }
+                    
+                    // Gate key changed or first load - update everything including buttons
+                    lastGateKeyRef.value = currentGateKey;
+
+                    if (data.transcript && Array.isArray(data.transcript)) {
                         // Check for ACTION_BUTTONS artifacts - only update if changed
                         // Backend should filter out buttons if decision is made, but we also check here
                         const currentButtonArtifact = data.latest_action_buttons || 
@@ -191,12 +212,56 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 ? data.artifacts.find((a: any) => a.type === 'ACTION_BUTTONS')
                                 : null);
                         
+                        // #region agent log
+                        if (currentButtonArtifact) {
+                            fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    location: 'ShapingChat.tsx:194',
+                                    message: 'Received action buttons from backend',
+                                    data: {
+                                        context: currentButtonArtifact.context,
+                                        button_count: currentButtonArtifact.buttons?.length || 0,
+                                        button_ids: currentButtonArtifact.buttons?.map((b: any) => b.id) || [],
+                                        button_labels: currentButtonArtifact.buttons?.map((b: any) => b.label) || [],
+                                        has_other_button: currentButtonArtifact.buttons?.some((b: any) => b.label === 'Other' || b.id?.includes('_other')) || false
+                                    },
+                                    timestamp: Date.now(),
+                                    sessionId: 'debug-session',
+                                    runId: 'run1',
+                                    hypothesisId: 'C'
+                                })
+                            }).catch(() => {});
+                        }
+                        // #endregion
+                        
                         if (currentButtonArtifact) {
                             setActionButtons((prev: any) => {
                                 // Compare by stringifying to avoid unnecessary updates
                                 const prevStr = JSON.stringify(prev);
                                 const newStr = JSON.stringify(currentButtonArtifact);
                                 if (prevStr !== newStr) {
+                                    // #region agent log
+                                    fetch('http://127.0.0.1:7243/ingest/2d690d57-f7bb-4ea6-989d-27d335039802', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            location: 'ShapingChat.tsx:210',
+                                            message: 'Updating action buttons state',
+                                            data: {
+                                                prev_button_count: prev?.buttons?.length || 0,
+                                                new_button_count: currentButtonArtifact.buttons?.length || 0,
+                                                prev_button_ids: prev?.buttons?.map((b: any) => b.id) || [],
+                                                new_button_ids: currentButtonArtifact.buttons?.map((b: any) => b.id) || []
+                                            },
+                                            timestamp: Date.now(),
+                                            sessionId: 'debug-session',
+                                            runId: 'run1',
+                                            hypothesisId: 'C'
+                                        })
+                                    }).catch(() => {});
+                                    // #endregion
                                     return currentButtonArtifact;
                                 }
                                 return prev;
@@ -487,7 +552,7 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                 } catch (e) {
                     console.error("Polling failed", e);
                 }
-            }, 500); // 500ms Tick matches the backend "Event Emitter" pace
+            }, 1000); // Increased to 1000ms to reduce race conditions with gate state updates
         }
         return () => {
             if (interval) clearInterval(interval);

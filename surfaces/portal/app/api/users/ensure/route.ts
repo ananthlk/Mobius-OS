@@ -83,14 +83,24 @@ export async function POST(request: NextRequest) {
             console.error("Unexpected error checking user:", checkResponse.status);
             return NextResponse.json({ error: "Failed to check user" }, { status: checkResponse.status });
         } catch (fetchError) {
-            console.error("Network error ensuring user:", fetchError);
-            // If backend is not available, return a specific error
-            if (fetchError instanceof TypeError && fetchError.message.includes("fetch")) {
+            // Check if it's a connection error (backend not available)
+            const isConnectionError = 
+                fetchError instanceof TypeError && 
+                (fetchError.message.includes("fetch") || 
+                 fetchError.message.includes("ECONNREFUSED") ||
+                 (fetchError as any).cause?.code === "ECONNREFUSED");
+            
+            if (isConnectionError) {
+                // Log a concise message instead of full stack trace
+                console.warn(`Backend API unavailable at ${apiUrl}. Ensure the backend server is running.`);
                 return NextResponse.json(
                     { error: "Backend API unavailable. Please ensure the backend server is running." },
                     { status: 503 }
                 );
             }
+            
+            // For other errors, log the full details
+            console.error("Network error ensuring user:", fetchError);
             throw fetchError;
         }
     } catch (error) {

@@ -244,6 +244,36 @@ class ConsultantBrain:
                 if "STRICT_CONSTRAINT" in config:
                     parts.append(f"\n\nSTRICT_CONSTRAINT: {config['STRICT_CONSTRAINT']}")
                 
+                # Add user communication preferences if available
+                user_id = context.get("user_id")
+                if user_id:
+                    try:
+                        from nexus.modules.user_manager import user_manager
+                        # Convert to int if needed (user_manager expects int)
+                        user_id_int = int(user_id) if isinstance(user_id, str) else user_id
+                        comm_profile = await user_manager.get_communication_profile(user_id_int)
+                        
+                        # Format preferences into instruction string if profile exists
+                        if comm_profile and comm_profile.get("user_id"):  # Check if profile exists (not just default)
+                            pref_parts = []
+                            if comm_profile.get("communication_style"):
+                                pref_parts.append(f"Communication style: {comm_profile['communication_style']}")
+                            if comm_profile.get("tone_preference"):
+                                pref_parts.append(f"Tone: {comm_profile['tone_preference']}")
+                            if comm_profile.get("response_format_preference"):
+                                pref_parts.append(f"Response format: {comm_profile['response_format_preference']}")
+                            if comm_profile.get("engagement_level"):
+                                pref_parts.append(f"Engagement level: {comm_profile['engagement_level']}")
+                            
+                            if pref_parts:
+                                parts.append("\n\nUSER_PREFERENCES:")
+                                parts.append("User communication preferences:")
+                                for p in pref_parts:
+                                    parts.append(f"  - {p}")
+                                logger.debug(f"[CONSULTANT] Added user communication preferences for user {user_id_int}")
+                    except Exception as e:
+                        logger.warning(f"[CONSULTANT] Could not load user communication preferences for user {user_id}: {e}")
+                
                 system_instruction = "\n".join(parts)
             else:
                 # Fallback: Use PromptBuilder for old format prompts
@@ -255,11 +285,42 @@ class ConsultantBrain:
                     # Fallback to transcript from context (for backward compatibility)
                     conversation_history = context.get("transcript", [])
                 
-                pb.build_from_config(config, context={
+                # Build context dict for PromptBuilder
+                builder_context = {
                     "rag_data": context.get("manuals", []),
                     "transcript": conversation_history,  # Use filtered conversation history
                     "user_query": user_query
-                })
+                }
+                
+                # Fetch and add user communication preferences if user_id is available
+                user_id = context.get("user_id")
+                if user_id:
+                    try:
+                        from nexus.modules.user_manager import user_manager
+                        # Convert to int if needed (user_manager expects int)
+                        user_id_int = int(user_id) if isinstance(user_id, str) else user_id
+                        comm_profile = await user_manager.get_communication_profile(user_id_int)
+                        
+                        # Format preferences into instruction string if profile exists
+                        if comm_profile and comm_profile.get("user_id"):  # Check if profile exists (not just default)
+                            pref_parts = []
+                            if comm_profile.get("communication_style"):
+                                pref_parts.append(f"Communication style: {comm_profile['communication_style']}")
+                            if comm_profile.get("tone_preference"):
+                                pref_parts.append(f"Tone: {comm_profile['tone_preference']}")
+                            if comm_profile.get("response_format_preference"):
+                                pref_parts.append(f"Response format: {comm_profile['response_format_preference']}")
+                            if comm_profile.get("engagement_level"):
+                                pref_parts.append(f"Engagement level: {comm_profile['engagement_level']}")
+                            
+                            if pref_parts:
+                                user_prefs_instruction = "User communication preferences:\n" + "\n".join(f"- {p}" for p in pref_parts)
+                                builder_context["user_preferences"] = user_prefs_instruction
+                                logger.debug(f"[CONSULTANT] Loaded user communication preferences for user {user_id_int}")
+                    except Exception as e:
+                        logger.warning(f"[CONSULTANT] Could not load user communication preferences for user {user_id}: {e}")
+                
+                pb.build_from_config(config, context=builder_context)
                 system_instruction = pb.build()
             
             logger.debug(f"[CONSULTANT] System instruction built | Length: {len(system_instruction)} chars")

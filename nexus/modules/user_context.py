@@ -132,5 +132,3 @@ def build_user_context_dict(user_id: str, session_id: Optional[str] = None) -> D
         "session_id": session_id
     }
 
-
-

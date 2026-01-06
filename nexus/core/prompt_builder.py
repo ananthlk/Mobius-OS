@@ -143,8 +143,11 @@ class PromptBuilder:
                 recent = transcript[-last_n:] if len(transcript) > last_n else transcript
                 self.add_context("CONVERSATION_HISTORY", json.dumps(recent, indent=2))
         
-        # Add user preferences (if available in context)
-        if "USER_PREFERENCES" in config:
+        # Add user preferences (if available in context - dynamically loaded from database)
+        if context and "user_preferences" in context:
+            self.add_context("USER_PREFERENCES", context["user_preferences"])
+        # Also check for static USER_PREFERENCES in config (for backward compatibility)
+        elif "USER_PREFERENCES" in config:
             self.add_context("USER_PREFERENCES", config["USER_PREFERENCES"].get("instruction", ""))
         
         # Add user role (if available in context)

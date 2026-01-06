@@ -415,10 +415,37 @@ async def planning_phase_decision(session_id: int, req: PlanningPhaseDecisionReq
     Supports: 'create_new', 'execute_existing', 'guide_me', 'refine_answers'
     """
     from nexus.brains.planning_phase import planning_phase_brain
+    from nexus.brains.conversational_agent import conversational_agent
     
     logger.info(f"[PLANNING_PHASE_DECISION] Received request: session_id={session_id}, choice={req.choice}")
     
     try:
+        # Map button choice ID to human-readable label
+        button_label_map = {
+            "create_new": "I want to create a new workflow",
+            "execute_existing": "I have an existing saved workflow that I would like to execute",
+            "guide_me": "Guide me",
+            "refine_answers": "Refine my answers (reinvoke gate stage)"
+        }
+        button_label = button_label_map.get(req.choice, req.choice.replace("_", " ").title())
+        
+        # Get user_id from session for conversational agent
+        session = await orchestrator.get_session_state(session_id)
+        user_id = session.get("user_id", "anonymous") if session else "anonymous"
+        
+        # Acknowledge button click via conversational agent
+        try:
+            await conversational_agent.acknowledge_button_click(
+                button_label=button_label,
+                button_id=req.choice,
+                user_id=user_id,
+                session_id=session_id,
+                context={"operation": "button_click", "source": "planning_phase_decision"}
+            )
+        except Exception as e:
+            logger.warning(f"[PLANNING_PHASE_DECISION] Conversational agent acknowledgment failed: {e}, continuing", exc_info=True)
+        
+        # Process the decision
         result = await planning_phase_brain.handle_build_reuse_decision(
             session_id=session_id,
             choice=req.choice

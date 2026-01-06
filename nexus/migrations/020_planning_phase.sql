@@ -25,3 +25,4 @@ COMMENT ON COLUMN shaping_sessions.planning_phase_approved_at IS 'Timestamp when
 
 
 
+

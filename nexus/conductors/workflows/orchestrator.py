@@ -89,7 +89,29 @@ class WorkflowOrchestrator(BaseOrchestrator):
             await self._set_state(f"session:{session_id}:user_id", user_id, session_id)
             await self._set_state(f"session:{session_id}:query", query, session_id)
             
-            # 3. Use base class for error handling with retry
+            # 3. Process initial query through gate engine to extract all gates
+            # The LLM will determine what gates can be extracted from the message
+            logger.debug(f"[WorkflowOrchestrator.start_shaping_session] Processing initial query through gate engine")
+            try:
+                result = await self.shaping_manager.append_message(session_id, "user", query)
+                
+                if result:
+                    # Format and emit the response
+                    await self._format_and_emit_response(
+                        session_id=session_id,
+                        user_id=user_id,
+                        raw_message=result.get("raw_message", ""),
+                        buttons=result.get("buttons"),
+                        button_context=result.get("button_context"),
+                        button_metadata=result.get("button_metadata"),
+                        skip_formatting=False
+                    )
+                    logger.debug(f"[WorkflowOrchestrator.start_shaping_session] Processed initial query through gate engine")
+            except Exception as e:
+                logger.warning(f"[WorkflowOrchestrator.start_shaping_session] Failed to process initial query: {e}, continuing with default flow", exc_info=True)
+                # Continue with default flow if processing fails
+            
+            # 4. Use base class for error handling with retry
             async def diagnose_query():
                 return await self.diagnosis_brain.diagnose(query)
             
@@ -301,6 +323,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
                     else:
                         self.logger.warning(f"[ORCHESTRATOR] Gate state is unexpected type: {type(gate_state_data)}")
                 
+                
                 # Fallback to journey_state if gate_state not available
                 if not current_phase:
                     from nexus.modules.journey_state import journey_state_manager
@@ -368,9 +391,12 @@ class WorkflowOrchestrator(BaseOrchestrator):
                     import json
                     artifacts = []
                     latest_action_buttons = None
-                    latest_gate_buttons = {}  # Track most recent buttons per gate_key
+                    latest_gate_buttons = {}  # Track most recent buttons per gate_key (only current gate)
                     latest_draft_plan = None  # Track latest DRAFT_PLAN artifact
                     latest_draft_plan_created_at = None
+                    
+                    # Track the gate key we've seen buttons for to detect changes
+                    seen_gate_key_for_buttons = None
                     
                     for row in artifact_results:
                         result_dict = dict(row)
@@ -399,86 +425,66 @@ class WorkflowOrchestrator(BaseOrchestrator):
                                 button_context = payload.get("context", "")
                                 button_metadata = payload.get("metadata", {})
                                 
-                                # PRIORITY 1: Gate confirmation buttons (highest priority when gates complete)
-                                # Show when gates complete but not confirmed
-                                if button_context == "gate_confirmation" and gates_complete:
-                                    # Check if user has confirmed by looking at transcript
-                                    awaiting_confirmation = False
-                                    user_confirmed = False
-                                    
-                                    if session.get("transcript"):
-                                        transcript = session.get("transcript", [])
-                                        # Check last few messages for confirmation status
-                                        last_few = transcript[-5:] if len(transcript) >= 5 else transcript
-                                        for msg in last_few:
-                                            if isinstance(msg, dict):
-                                                completion_status = msg.get("completion_status", {})
-                                                completion_reason = completion_status.get("completion_reason", "")
-                                                
-                                                # Check if we're awaiting confirmation
-                                                if completion_reason == "awaiting_user_confirmation":
-                                                    awaiting_confirmation = True
-                                                
-                                                # Check if user has confirmed
-                                                if completion_reason == "user_confirmed":
-                                                    user_confirmed = True
-                                                    awaiting_confirmation = False
-                                                    break
-                                    
-                                    # Show confirmation buttons when gates complete but awaiting confirmation
-                                    # CRITICAL: Only show if user hasn't confirmed yet
-                                    if awaiting_confirmation and not user_confirmed:
+                                # PRIORITY 1: Planning phase buttons (highest priority when in planning phase)
+                                # Check planning phase FIRST to override gate confirmation buttons
+                                if button_context == "planning_phase_decision" and current_phase == "planning_phase":
+                                    button_phase = button_metadata.get("phase", "")
+                                    if button_phase == "planning" and decision_made is False:
                                         latest_action_buttons = payload
-                                        self.logger.info(f"[ORCHESTRATOR] ✅ Matched gate confirmation buttons (gates complete, awaiting confirmation)")
-                                        # Don't check other button types - gate confirmation takes priority
+                                        # Clear any gate buttons - planning phase buttons take priority
+                                        latest_gate_buttons = {}
+                                        self.logger.info(f"[ORCHESTRATOR] ✅ Matched planning phase buttons (in planning phase, priority over confirmation)")
                                         continue
                                 
-                                # PRIORITY 2: Planning phase buttons (only after user confirmed)
-                                # For planning_phase_decision context, match to planning phase
-                                elif button_context == "planning_phase_decision":
-                                    # Only show planning phase buttons if:
-                                    # 1. User has confirmed gates (user_confirmed = True)
-                                    # 2. We're in planning phase
-                                    # 3. No decision has been made yet
-                                    
-                                    # Check if user has confirmed
-                                    user_confirmed = False
-                                    if session.get("transcript"):
-                                        transcript = session.get("transcript", [])
-                                        last_few = transcript[-5:] if len(transcript) >= 5 else transcript
-                                        for msg in last_few:
-                                            if isinstance(msg, dict):
-                                                completion_status = msg.get("completion_status", {})
-                                                completion_reason = completion_status.get("completion_reason", "")
-                                                if completion_reason == "user_confirmed":
-                                                    user_confirmed = True
-                                                    break
-                                    
-                                    # Only show planning phase buttons if user confirmed AND in planning phase AND no decision made
-                                    if user_confirmed and current_phase == "planning_phase" and decision_made is False:
-                                        button_phase = button_metadata.get("phase", "")
-                                        if button_phase == "planning":
-                                            if latest_action_buttons is None:
-                                                latest_action_buttons = payload
-                                                self.logger.info(f"[ORCHESTRATOR] ✅ Matched planning phase buttons (user confirmed, in planning phase)")
+                                # PRIORITY 2: Gate confirmation buttons (only when NOT in planning phase)
+                                # Show when:
+                                # 1. Gates are complete (pass_ = True), OR
+                                # 2. All gates answered but awaiting confirmation (pass_ = False, next_gate = None)
+                                # AND NOT in planning phase
+                                is_awaiting_confirmation = (
+                                    not gates_complete and 
+                                    current_gate_key is None and 
+                                    current_phase == "gate_phase"
+                                )
                                 
-                                # PRIORITY 3: Gate question buttons (only during gate phase)
+                                if button_context == "gate_confirmation" and (gates_complete or is_awaiting_confirmation) and current_phase != "planning_phase":
+                                    # If gates are complete and we have confirmation buttons, show them
+                                    # The buttons are only emitted when awaiting confirmation, so if they exist, show them
+                                    latest_action_buttons = payload
+                                    # Clear any gate question buttons - confirmation buttons are the only ones that should show
+                                    latest_gate_buttons = {}
+                                    self.logger.info(f"[ORCHESTRATOR] ✅ Matched gate confirmation buttons (gates complete, buttons found). Clearing gate question buttons.")
+                                    
+                                    # Don't check other button types - gate confirmation takes priority
+                                    continue
+                                
+                                # IMPORTANT: If gates are complete, skip ALL gate question buttons
+                                # This prevents old gate buttons from showing up alongside confirmation buttons
+                                if gates_complete and button_context == "gate_question":
+                                    self.logger.debug(f"[ORCHESTRATOR] Skipping gate question buttons (gates complete, showing confirmation buttons only)")
+                                    continue
+                                
+                                # PRIORITY 3: Gate question buttons (only during gate phase, NOT when gates complete)
                                 # For gate_question context, match to current gate step
-                                elif button_context == "gate_question" and current_phase == "gate_phase":
+                                # IMPORTANT: Skip gate question buttons entirely if gates are complete
+                                elif button_context == "gate_question" and not gates_complete and current_phase == "gate_phase":
                                     button_gate_key = button_metadata.get("gate_key")
                                     
-                                    # Removed verbose polling log - button checking happens on every poll
-                                    
-                                    # Only show buttons if they match current gate step
+                                    # CRITICAL: Only show buttons if they match current gate step
+                                    # Clear any buttons from previous gates - only keep current gate buttons
                                     if current_gate_key and button_gate_key == current_gate_key:
                                         # Track most recent buttons for this gate_key
                                         # Since we iterate DESC, first match is most recent
                                         if button_gate_key not in latest_gate_buttons:
+                                            # CRITICAL: If gate key changed, clear old buttons from other gates
+                                            if seen_gate_key_for_buttons is not None and seen_gate_key_for_buttons != current_gate_key:
+                                                latest_gate_buttons = {}  # Clear all old buttons
+                                                self.logger.info(f"[ORCHESTRATOR] Gate key changed from '{seen_gate_key_for_buttons}' to '{current_gate_key}' - clearing old buttons")
+                                            
+                                            # Only keep current gate buttons
                                             latest_gate_buttons[button_gate_key] = payload
-                                            self.logger.info(f"[ORCHESTRATOR] ✅ Matched buttons for gate '{button_gate_key}'")
-                                    # If gates complete, don't show any gate buttons
-                                    elif gates_complete:
-                                        pass  # Skip gate buttons when gates are complete
+                                            seen_gate_key_for_buttons = button_gate_key
+                                            self.logger.info(f"[ORCHESTRATOR] ✅ Matched buttons for gate '{button_gate_key}' (cleared old gate buttons if gate changed)")
                                     elif button_gate_key != current_gate_key:
                                         pass  # Skip buttons that don't match current gate
                                 
@@ -488,11 +494,15 @@ class WorkflowOrchestrator(BaseOrchestrator):
                     
                     # After processing all artifacts, select buttons for current gate OR confirmation
                     if current_phase == "gate_phase":
-                        if gates_complete and latest_action_buttons is None:
-                            # If gates complete but no confirmation buttons found yet, 
-                            # they should have been set above, but this is a fallback
-                            # (Confirmation buttons should be set in the loop above)
-                            pass
+                        if gates_complete:
+                            # When gates are complete, only show confirmation buttons
+                            # Don't fall back to gate question buttons
+                            if latest_action_buttons is None:
+                                # If gates complete but no confirmation buttons found yet, 
+                                # they should have been set above, but this is a fallback
+                                # (Confirmation buttons should be set in the loop above)
+                                pass
+                            # Explicitly don't use gate question buttons when gates are complete
                         elif current_gate_key:
                             # Get the most recent buttons for the current gate step
                             if current_gate_key in latest_gate_buttons:
@@ -630,7 +640,7 @@ class WorkflowOrchestrator(BaseOrchestrator):
     
     async def handle_chat_message(self, session_id: int, message: str, user_id: str) -> Dict[str, Any]:
         """
-        Handle a chat message - routes to the active agent.
+        Handle a chat message - conversational agent receives first, then routes to active agent.
         Simple state machine: only one agent is active at a time.
         Returns: {reply, trace_id}
         """
@@ -638,36 +648,58 @@ class WorkflowOrchestrator(BaseOrchestrator):
         self._log_operation("handle_chat_message", {"session_id": session_id, "user_id": user_id})
         
         try:
-            # Get session to check active agent
+            # 1. Conversational Agent receives message first (entry point)
+            from nexus.brains.conversational_agent import conversational_agent
+            
+            try:
+                reception_result = await conversational_agent.receive_and_acknowledge(
+                    user_message=message,
+                    user_id=user_id,
+                    session_id=session_id,
+                    context={"operation": "message_reception", "source": "workflow_orchestrator"}
+                )
+                processed_message = reception_result.get("processed_message", message)
+                routing_hint = reception_result.get("routing_decision", "gate")
+                logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Conversational agent acknowledged | Routing hint: {routing_hint}")
+            except Exception as e:
+                logger.warning(f"[WorkflowOrchestrator.handle_chat_message] Conversational agent failed: {e}, continuing with fallback", exc_info=True)
+                # Fallback: continue without acknowledgment if conversational agent fails
+                processed_message = message
+                routing_hint = "gate"
+            
+            # 2. Get session to check active agent (session state takes precedence over routing hint)
             session = await self.shaping_manager.get_session(session_id)
             active_agent = session.get("active_agent") if session else None
             
-            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Active agent: {active_agent}")
+            # Use active_agent from session if available, otherwise use routing hint
+            target_agent = active_agent or routing_hint
             
-            # Route to active agent (or gate if none set)
-            if active_agent == "planning":
+            logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Active agent: {active_agent}, Target agent: {target_agent}")
+            
+            # 3. Route to appropriate handler based on target agent
+            if target_agent == "planning":
                 logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Routing to planning phase brain")
                 result = await self.planning_phase_brain.handle_message(
                     session_id=session_id,
-                    message=message,
+                    message=processed_message,
                     user_id=user_id
                 )
                 return {
                     "reply": result.get("message", ""),
                     "trace_id": None
                 }
-            elif active_agent == "execution":
+            elif target_agent == "execution":
                 # TODO: Route to execution brain when implemented
                 logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Routing to execution brain (not implemented)")
                 return {"reply": "Execution phase not yet implemented", "trace_id": None}
             else:
                 # Default: gate agent (or if active_agent is NULL/None)
                 logger.debug(f"[WorkflowOrchestrator.handle_chat_message] Routing to gate agent")
-                result = await self.shaping_manager.append_message(session_id, "user", message)
+                result = await self.shaping_manager.append_message(session_id, "user", processed_message)
                 
                 if result:
                     # Check if this is a stop message (workflow stopped)
-                    completion_status = result.get("completion_status", {})
+                    completion_status = result.get("completion_status") or {}  # Handle None case
                     is_stopped = (
                         completion_status.get("is_complete") == True and 
                         completion_status.get("ready_for_handoff") == False
@@ -1546,10 +1578,19 @@ class WorkflowOrchestrator(BaseOrchestrator):
             self.logger.debug(f"[WorkflowOrchestrator._format_and_emit_response] Skipping formatting (stop message)")
         else:
             try:
+                # Get conversation history for contextualization
+                session = await self.shaping_manager.get_session(session_id)
+                conversation_history = session.get("transcript", []) if session else []
+                
                 formatted_message = await conversational_agent.format_response(
                     raw_response=raw_message,
                     user_id=user_id,
-                    context={"operation": "gate_response", "source": "gate_engine", "session_id": session_id}
+                    context={
+                        "operation": "gate_response",
+                        "source": "gate_engine",
+                        "session_id": session_id,
+                        "conversation_history": conversation_history
+                    }
                 )
             except Exception as e:
                 self.logger.warning(f"Conversational agent formatting failed: {e}")

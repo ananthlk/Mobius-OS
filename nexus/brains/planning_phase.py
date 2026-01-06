@@ -71,14 +71,46 @@ What would you like to do next?"""
         
         # Emit buttons using ActionButtonHandler
         handler = ActionButtonHandler(agent)
-        buttons = [
+        buttons = self._build_planning_phase_buttons(session_id, user_id)
+        
+        await handler.emit_decision_buttons(
+            buttons=buttons,
+            decision_column="planning_phase_decision",
+            decision_table="shaping_sessions",
+            context="planning_phase_decision",
+            metadata={"phase": "planning"}
+        )
+        
+        logger.debug(f"[PlanningPhaseBrain.announce_planning_phase_start] EXIT | Announcement complete")
+    
+    def _build_planning_phase_buttons(
+        self,
+        session_id: int,
+        user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Build planning phase buttons from config (config-driven) or fallback to defaults.
+        
+        Args:
+            session_id: Session ID for endpoint template
+            user_id: User ID for payload
+            
+        Returns:
+            List of button configurations
+        """
+        # TODO: Load from prompt config when planning phase button configs are added
+        # For now, use defaults (can be moved to config later)
+        endpoint_template = "/api/workflows/shaping/{session_id}/planning-phase/decision"
+        endpoint = endpoint_template.format(session_id=session_id)
+        
+        return [
             {
                 "id": "execute_existing",
                 "label": "I have an existing saved workflow that I would like to execute",
                 "variant": "secondary",
                 "action": {
                     "type": "api_call",
-                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "endpoint": endpoint,
                     "method": "POST",
                     "payload": {"choice": "execute_existing", "user_id": user_id}
                 },
@@ -91,7 +123,7 @@ What would you like to do next?"""
                 "variant": "primary",
                 "action": {
                     "type": "api_call",
-                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "endpoint": endpoint,
                     "method": "POST",
                     "payload": {"choice": "create_new", "user_id": user_id}
                 },
@@ -104,7 +136,7 @@ What would you like to do next?"""
                 "variant": "secondary",
                 "action": {
                     "type": "api_call",
-                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "endpoint": endpoint,
                     "method": "POST",
                     "payload": {"choice": "guide_me", "user_id": user_id}
                 },
@@ -117,7 +149,7 @@ What would you like to do next?"""
                 "variant": "secondary",
                 "action": {
                     "type": "api_call",
-                    "endpoint": f"/api/workflows/shaping/{session_id}/planning-phase/decision",
+                    "endpoint": endpoint,
                     "method": "POST",
                     "payload": {"choice": "refine_answers", "user_id": user_id}
                 },
@@ -125,16 +157,6 @@ What would you like to do next?"""
                 "tooltip": "Coming soon"
             }
         ]
-        
-        await handler.emit_decision_buttons(
-            buttons=buttons,
-            decision_column="planning_phase_decision",
-            decision_table="shaping_sessions",
-            context="planning_phase_decision",
-            metadata={"phase": "planning"}
-        )
-        
-        logger.debug(f"[PlanningPhaseBrain.announce_planning_phase_start] EXIT | Announcement complete")
     
     async def handle_message(
         self,

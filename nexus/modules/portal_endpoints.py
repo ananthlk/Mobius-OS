@@ -66,3 +66,51 @@ async def portal_chat(request: PortalChatRequest, background_tasks: BackgroundTa
         logger.warning(f"Failed to track profile interaction: {e}", exc_info=True)
     
     return response_msg
+
+    try:
+        await track_chat_interaction(
+            auth_id=request.user_id,
+            user_message=last_msg.content,
+            assistant_response=response_content,
+            background_tasks=background_tasks,
+            metadata={"module": "portal", "active_patient_id": request.active_patient_id}
+        )
+    except Exception as e:
+        # Log but don't fail the request
+        import logging
+        logger = logging.getLogger("nexus.portal")
+        logger.warning(f"Failed to track profile interaction: {e}", exc_info=True)
+    
+    return response_msg
+
+    try:
+        await track_chat_interaction(
+            auth_id=request.user_id,
+            user_message=last_msg.content,
+            assistant_response=response_content,
+            background_tasks=background_tasks,
+            metadata={"module": "portal", "active_patient_id": request.active_patient_id}
+        )
+    except Exception as e:
+        # Log but don't fail the request
+        import logging
+        logger = logging.getLogger("nexus.portal")
+        logger.warning(f"Failed to track profile interaction: {e}", exc_info=True)
+    
+    return response_msg
+
+    try:
+        await track_chat_interaction(
+            auth_id=request.user_id,
+            user_message=last_msg.content,
+            assistant_response=response_content,
+            background_tasks=background_tasks,
+            metadata={"module": "portal", "active_patient_id": request.active_patient_id}
+        )
+    except Exception as e:
+        # Log but don't fail the request
+        import logging
+        logger = logging.getLogger("nexus.portal")
+        logger.warning(f"Failed to track profile interaction: {e}", exc_info=True)
+    
+    return response_msg

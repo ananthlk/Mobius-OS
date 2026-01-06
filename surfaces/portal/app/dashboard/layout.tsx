@@ -103,7 +103,10 @@ export default function DashboardLayout({
                     <ModelBadge pathname={pathname} />
                 </div>
 
-                <div className="flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-max">
+                <Link 
+                    href={`/dashboard/admin/clients?auth_id=${session?.user?.id || ''}`}
+                    className="flex items-center gap-3 px-2 py-3 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-max"
+                >
                     {session?.user?.image ? (
                         <img src={session.user.image} className="w-8 h-8 rounded-full" />
                     ) : (
@@ -111,10 +114,10 @@ export default function DashboardLayout({
                             {session?.user?.name?.[0] || "U"}
                         </div>
                     )}
-                    <div className="text-sm font-medium overflow-hidden text-ellipsis whitespace-nowrap max-w-[140px]">
+                    <div className="text-sm font-medium overflow-hidden text-ellipsis whitespace-nowrap max-w-[140px] hover:underline hover:text-[var(--primary-blue)] transition-colors">
                         {session?.user?.email}
                     </div>
-                </div>
+                </Link>
             </aside>
 
             {/* Main Content Area */}
@@ -184,5 +187,5 @@ function SidebarItem({ label, active = false }: { label: string, active?: boolea
         <div className={`px-4 py-3 rounded-full cursor-pointer text-sm font-medium transition-colors ${active ? 'bg-[#E8F0FE] text-[#1967D2]' : 'text-[#444746] hover:bg-gray-100'}`}>
             {label}
         </div>
-    )
+    );
 }

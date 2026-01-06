@@ -155,5 +155,3 @@ CREATE TRIGGER update_user_use_case_profiles_updated_at BEFORE UPDATE ON user_us
 CREATE TRIGGER update_user_ai_preference_profiles_updated_at BEFORE UPDATE ON user_ai_preference_profiles FOR EACH ROW EXECUTE FUNCTION update_user_profiles_updated_at();
 CREATE TRIGGER update_user_query_history_profiles_updated_at BEFORE UPDATE ON user_query_history_profiles FOR EACH ROW EXECUTE FUNCTION update_user_profiles_updated_at();
 
-
-

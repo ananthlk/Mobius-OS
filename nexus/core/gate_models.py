@@ -54,6 +54,9 @@ class GateDef:
     question: str
     required: bool
     expected_categories: List[str] = field(default_factory=list)  # For classification (empty list if no categories)
+    limiting_values: Optional[List[str]] = None  # Values that stop the workflow (e.g., ["No", "Unknown"])
+    stop_message: Optional[str] = None  # Custom stop message for this gate
+    button_config: Optional[Dict[str, Any]] = None  # Button configuration for this gate
     # Note: mode and completion_rule inferred from expected_categories:
     # - If expected_categories is non-empty → classified_required
     # - If expected_categories is empty → raw_required
@@ -80,6 +83,7 @@ class GateConfig:
     strict_json_schema: Dict[str, Any]  # Output schema definition
     system_instructions: str  # Additional context
     policy: Policy = field(default_factory=Policy)  # Policy settings
+    confirmation_buttons: Optional[Dict[str, Any]] = None  # Confirmation button configuration
     
     @classmethod
     def from_prompt_config(cls, config: Dict[str, Any]) -> 'GateConfig':
@@ -87,10 +91,16 @@ class GateConfig:
         # Extract gates
         gates = {}
         for gate_key, gate_data in config.get("GATES", {}).items():
+            # Extract button_config if present
+            button_config = gate_data.get("button_config")
+            
             gates[gate_key] = GateDef(
                 question=gate_data.get("question", ""),
                 required=gate_data.get("required", False),
-                expected_categories=gate_data.get("expected_categories", [])
+                expected_categories=gate_data.get("expected_categories", []),
+                limiting_values=gate_data.get("limiting_values"),  # Optional: values that stop workflow
+                stop_message=gate_data.get("stop_message"),  # Optional: custom stop message
+                button_config=button_config  # Optional: button configuration
             )
         
         # Extract policy if present
@@ -100,6 +110,9 @@ class GateConfig:
             allow_user_clear_values=policy_data.get("allow_user_clear_values", True),
             strict_classified_validation=policy_data.get("strict_classified_validation", False)  # Default: lenient
         )
+        
+        # Extract confirmation buttons if present
+        confirmation_buttons = config.get("CONFIRMATION_BUTTONS")
         
         return cls(
             path=config.get("PATH", {}),
@@ -111,7 +124,8 @@ class GateConfig:
             mandatory_logic=config.get("MANDATORY_LOGIC", []),
             strict_json_schema=config.get("STRICT_JSON_SCHEMA", {}),
             system_instructions=config.get("SYSTEM_INSTRUCTIONS", ""),
-            policy=policy
+            policy=policy,
+            confirmation_buttons=confirmation_buttons
         )
 
 

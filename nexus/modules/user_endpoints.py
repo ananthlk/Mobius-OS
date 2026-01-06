@@ -454,4 +454,3 @@ async def get_all_profiles(user_id: int):
     except Exception as e:
         logger.error(f"[user_endpoints.get_all_profiles] ERROR: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
