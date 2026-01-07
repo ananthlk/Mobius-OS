@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ArrowLeft, Users, Plus, Edit, Trash2, Shield, Mail, User as UserIcon, Eye, ChevronDown, ChevronRight } from "lucide-react";
@@ -38,7 +38,7 @@ interface SessionLink {
     created_at: string;
 }
 
-export default function ClientsPage() {
+function ClientsPageContent() {
     const { data: session } = useSession();
     const searchParams = useSearchParams();
     const router = useRouter();
