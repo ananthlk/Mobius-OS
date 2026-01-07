@@ -1183,3 +1183,15 @@ function ClientsPageContent() {
         </div>
     );
 }
+
+export default function ClientsPage() {
+    return (
+        <Suspense fallback={
+            <div className="h-full flex items-center justify-center">
+                <div className="text-[var(--text-secondary)]">Loading...</div>
+            </div>
+        }>
+            <ClientsPageContent />
+        </Suspense>
+    );
+}
