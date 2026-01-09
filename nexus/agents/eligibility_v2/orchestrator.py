@@ -45,6 +45,67 @@ class EligibilityOrchestrator:
         self.scoring_repo = ScoringRepository()
         self.llm_call_repo = LLMCallRepository()
     
+    def _log_case_state(self, step_name: str, case_state: Optional[CaseState], patient_id: Optional[str] = None):
+        """
+        Log CaseState in a readable format for debugging.
+        
+        Args:
+            step_name: Name of the step (e.g., "After Loading Patient Data")
+            case_state: The CaseState to log (can be None)
+            patient_id: Optional patient_id for context
+        """
+        logger.info(f"[DEBUG] ========== {step_name} ==========")
+        if patient_id:
+            logger.info(f"[DEBUG] Patient ID: {patient_id}")
+        
+        if case_state is None:
+            logger.info(f"[DEBUG] CaseState is None!")
+            logger.info(f"[DEBUG] ========================================")
+            return
+        
+        # Patient info
+        logger.info(f"[DEBUG] Patient:")
+        logger.info(f"  - first_name: {repr(case_state.patient.first_name)}")
+        logger.info(f"  - last_name: {repr(case_state.patient.last_name)}")
+        logger.info(f"  - date_of_birth: {repr(case_state.patient.date_of_birth)} (type: {type(case_state.patient.date_of_birth).__name__ if case_state.patient.date_of_birth else 'None'})")
+        logger.info(f"  - member_id: {repr(case_state.patient.member_id)}")
+        logger.info(f"  - sex: {repr(case_state.patient.sex)}")
+        
+        # Health plan info
+        logger.info(f"[DEBUG] Health Plan:")
+        logger.info(f"  - payer_name: {repr(case_state.health_plan.payer_name)}")
+        logger.info(f"  - payer_id: {repr(case_state.health_plan.payer_id)}")
+        logger.info(f"  - plan_name: {repr(case_state.health_plan.plan_name)}")
+        logger.info(f"  - product_type: {repr(case_state.health_plan.product_type)}")
+        logger.info(f"  - contract_status: {repr(case_state.health_plan.contract_status)}")
+        
+        # Timing info
+        logger.info(f"[DEBUG] Timing:")
+        logger.info(f"  - dos_date: {repr(case_state.timing.dos_date)} (type: {type(case_state.timing.dos_date).__name__ if case_state.timing.dos_date else 'None'})")
+        logger.info(f"  - event_tense: {repr(case_state.timing.event_tense)}")
+        logger.info(f"  - related_visits count: {len(case_state.timing.related_visits) if case_state.timing.related_visits else 0}")
+        if case_state.timing.related_visits:
+            for i, visit in enumerate(case_state.timing.related_visits[:3]):  # Log first 3 visits
+                logger.info(f"    - visit {i}: date={visit.visit_date}, type={visit.visit_type}, status={visit.status}")
+        
+        # Eligibility truth
+        logger.info(f"[DEBUG] Eligibility Truth:")
+        logger.info(f"  - status: {repr(case_state.eligibility_truth.status)}")
+        logger.info(f"  - coverage_window_start: {repr(case_state.eligibility_truth.coverage_window_start)}")
+        logger.info(f"  - coverage_window_end: {repr(case_state.eligibility_truth.coverage_window_end)}")
+        logger.info(f"  - evidence_strength: {repr(case_state.eligibility_truth.evidence_strength)}")
+        
+        # Eligibility check
+        logger.info(f"[DEBUG] Eligibility Check:")
+        logger.info(f"  - checked: {case_state.eligibility_check.checked}")
+        logger.info(f"  - check_date: {case_state.eligibility_check.check_date}")
+        logger.info(f"  - source: {case_state.eligibility_check.source}")
+        if case_state.eligibility_check.result_raw:
+            result_preview = case_state.eligibility_check.result_raw[:200] if len(case_state.eligibility_check.result_raw) > 200 else case_state.eligibility_check.result_raw
+            logger.info(f"  - result_raw (preview): {result_preview}...")
+        
+        logger.info(f"[DEBUG] ========================================")
+    
     async def process_turn(
         self,
         case_id: str,
@@ -58,7 +119,7 @@ class EligibilityOrchestrator:
         Returns:
             Dict with case_state, score_state, next_questions, improvement_plan, presentation_summary
         """
-        logger.info(f"Processing turn for case {case_id}")
+        logger.info(f"Processing turn for case {case_id}, patient_id={patient_id}")
         
         # 1. Get or create case
         case_pk = await self.case_repo.get_or_create_case(case_id, session_id)
@@ -68,19 +129,34 @@ class EligibilityOrchestrator:
         if not case_state:
             case_state = CaseState()
         
+        self._log_case_state("STEP 1: After Loading Case State (Initial)", case_state, patient_id)
+        
         # 3. Load patient data if patient_id provided (always fresh, never cached)
         if patient_id:
             await self._emit_process_event(session_id, "patient_loading", "in_progress", "Loading patient EMR record...")
             case_state = await self._load_patient_data(case_state, patient_id, session_id)
             await self._emit_process_event(session_id, "patient_loading", "complete", "Patient details loaded")
+            self._log_case_state("STEP 2: After Loading Patient Data", case_state, patient_id)
         
         # 4. Interpret user input
         await self._emit_process_event(session_id, "interpretation", "in_progress", "Interpreting user input - extracting information from message...")
+        
+        # Log what we're sending to interpreter
+        logger.info(f"[DEBUG] Sending to interpreter - CaseState JSON (first 1500 chars):")
+        case_state_json = case_state.model_dump_json(indent=2)
+        logger.info(f"[DEBUG] {case_state_json[:1500]}")
+        logger.info(f"[DEBUG] User input: {ui_event.data}")
+        
         interpret_response = await self.interpreter.interpret(
             case_state=case_state,
             ui_event=ui_event,
             case_pk=case_pk
         )
+        
+        logger.info(f"[DEBUG] Interpreter Response:")
+        logger.info(f"  - suggested_updates: {interpret_response.suggested_updates.model_dump()}")
+        logger.info(f"  - reasoning: {interpret_response.reasoning}")
+        logger.info(f"  - NOTE: LLM completion status is ignored - using deterministic CompletionChecker instead")
         
         # Apply interpreter suggestions deterministically
         case_state = self._deterministically_update_case_state(
@@ -89,9 +165,15 @@ class EligibilityOrchestrator:
             updates=interpret_response.suggested_updates.model_dump()
         )
         
-        completion_status = interpret_response.completion
+        self._log_case_state("STEP 3: After Interpreter + Deterministic Update", case_state, patient_id)
         
-        # Check for missing fields after interpretation
+        # Use deterministic CompletionChecker to determine missing fields (NOT the LLM's completion status)
+        completion_status = self.completion_checker.check_completion(case_state)
+        logger.info(f"[DEBUG] Deterministic Completion Check:")
+        logger.info(f"  - status: {completion_status.status}")
+        logger.info(f"  - missing_fields: {completion_status.missing_fields}")
+        
+        # Check for missing fields after interpretation (deterministically determined)
         missing_fields = completion_status.missing_fields
         missing_msg = f"Interpretation complete"
         if missing_fields:
@@ -101,6 +183,11 @@ class EligibilityOrchestrator:
         # 5. Perform eligibility check if insurance info is available
         if case_state.health_plan.payer_name and case_state.patient.member_id:
             eligibility_result = await self._check_and_perform_eligibility_check(case_state, session_id)
+            logger.info(f"[DEBUG] Eligibility Check Result:")
+            logger.info(f"  - windows count: {len(eligibility_result.get('eligibility_windows', []))}")
+            for i, window in enumerate(eligibility_result.get('eligibility_windows', [])):
+                logger.info(f"  - window {i}: status={window.get('status')}, effective={window.get('effective_date')}, end={window.get('end_date')}")
+            
             # Apply eligibility check updates deterministically
             case_state = self._deterministically_update_case_state(
                 case_state=case_state,
@@ -108,6 +195,7 @@ class EligibilityOrchestrator:
                 updates={},  # Updates come from eligibility_result
                 eligibility_check_result=eligibility_result
             )
+            self._log_case_state("STEP 4: After Eligibility Check + Deterministic Update", case_state, patient_id)
         
         # 6. Score
         await self._emit_process_event(session_id, "scoring", "in_progress", "Scoring engine initiated - calculating eligibility probability...")
@@ -122,6 +210,7 @@ class EligibilityOrchestrator:
             )
         
         score_state = await self.scorer.score(case_state, emit_calculation=emit_calculation)
+        self._log_case_state("STEP 5: After Scoring", case_state, patient_id)
         
         # 6.5. If we have visits with probabilities, compute weighted average for case-level probability
         if case_state.timing.related_visits and len(case_state.timing.related_visits) > 0:
@@ -172,6 +261,7 @@ class EligibilityOrchestrator:
             score_state=score_state,
             completion_status=completion_status
         )
+        self._log_case_state("STEP 6: After Planning", case_state, patient_id)
         await self._emit_process_event(
             session_id,
             "planning",
@@ -213,10 +303,17 @@ class EligibilityOrchestrator:
         )
         from nexus.tools.eligibility.eligibility_270_transaction import Eligibility270TransactionTool
         
+        # Check for test scenario
+        from nexus.tools.eligibility.test_scenarios import get_test_scenario
+        test_scenario = get_test_scenario(patient_id)
+        if test_scenario:
+            logger.info(f"[DEBUG] Test scenario detected for {patient_id}: {test_scenario}")
+        
         # Load demographics
         demographics_tool = EMRPatientDemographicsRetriever()
         try:
             demographics = await demographics_tool.run_async(patient_id)
+            logger.info(f"[DEBUG] Demographics tool returned: {demographics}")
             if demographics:
                 case_state.patient.member_id = demographics.get("member_id")
                 case_state.patient.first_name = demographics.get("first_name")
@@ -236,6 +333,7 @@ class EligibilityOrchestrator:
                 else:
                     case_state.patient.sex = None
                 logger.info(f"Loaded demographics for patient {patient_id}")
+                logger.info(f"[DEBUG] After setting demographics: first_name={repr(case_state.patient.first_name)}, last_name={repr(case_state.patient.last_name)}, dob={repr(case_state.patient.date_of_birth)}, member_id={repr(case_state.patient.member_id)}")
                 
                 # Emit thinking message with demographics metadata
                 demographics_summary = f"Retrieved demographics: {demographics.get('first_name')} {demographics.get('last_name')}"
@@ -249,6 +347,8 @@ class EligibilityOrchestrator:
                     **demographics
                 }
                 await self._emit_thinking_message(session_id, "patient_loading", demographics_summary, demographics_metadata)
+            else:
+                logger.info(f"[DEBUG] Demographics tool returned empty dict (test scenario: demographics=NONE)")
         except Exception as e:
             logger.warning(f"Failed to load demographics for {patient_id}: {e}")
             await self._emit_thinking_message(session_id, "patient_loading", f"Failed to load demographics: {str(e)}")
@@ -257,12 +357,14 @@ class EligibilityOrchestrator:
         insurance_tool = EMRPatientInsuranceInfoRetriever()
         try:
             insurance = await insurance_tool.run_async(patient_id)
+            logger.info(f"[DEBUG] Insurance tool returned: {insurance}")
             if insurance:
                 case_state.health_plan.payer_name = insurance.get("payer_name")
                 case_state.health_plan.payer_id = insurance.get("payer_id")
                 case_state.health_plan.plan_name = insurance.get("plan_name")
                 case_state.patient.member_id = insurance.get("member_id") or case_state.patient.member_id
                 logger.info(f"Loaded insurance info for patient {patient_id}")
+                logger.info(f"[DEBUG] After setting insurance: payer_name={repr(case_state.health_plan.payer_name)}, payer_id={repr(case_state.health_plan.payer_id)}, plan_name={repr(case_state.health_plan.plan_name)}")
                 
                 # Emit thinking message with insurance metadata
                 insurance_summary = f"Retrieved insurance: {insurance.get('payer_name')}"
@@ -278,6 +380,8 @@ class EligibilityOrchestrator:
                     **insurance
                 }
                 await self._emit_thinking_message(session_id, "patient_loading", insurance_summary, insurance_metadata)
+            else:
+                logger.info(f"[DEBUG] Insurance tool returned empty dict (test scenario: insurance=NONE)")
         except Exception as e:
             logger.warning(f"Failed to load insurance for {patient_id}: {e}")
             await self._emit_thinking_message(session_id, "patient_loading", f"Failed to load insurance: {str(e)}")
@@ -741,6 +845,12 @@ class EligibilityOrchestrator:
         Returns:
             Updated CaseState
         """
+        logger.info(f"[DEBUG] ========== Deterministic Update from {update_source} ==========")
+        logger.info(f"[DEBUG] Updates dict: {updates}")
+        if eligibility_check_result:
+            logger.info(f"[DEBUG] Eligibility check result keys: {list(eligibility_check_result.keys())}")
+            if "eligibility_windows" in eligibility_check_result:
+                logger.info(f"[DEBUG] Eligibility windows: {len(eligibility_check_result['eligibility_windows'])} windows")
         logger.info(f"Deterministically updating case state from {update_source}")
         
         if update_source == "eligibility_check":
@@ -865,6 +975,7 @@ class EligibilityOrchestrator:
             # for future deterministic updates based on score_state
             pass
         
+        logger.info(f"[DEBUG] ========== End Deterministic Update from {update_source} ==========")
         return case_state
     
     async def _emit_thinking_message(

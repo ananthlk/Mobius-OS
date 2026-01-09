@@ -97,6 +97,9 @@ class LLMResponseParser:
         # This handles // style comments which are common in LLM responses
         json_str_cleaned = self._remove_json_comments(json_str)
         
+        # Step 2.6: Remove trailing commas (common LLM error)
+        json_str_cleaned = self._remove_trailing_commas(json_str_cleaned)
+        
         # Step 3: Parse JSON, with repair if needed
         try:
             data = json.loads(json_str_cleaned)
@@ -107,7 +110,7 @@ class LLMResponseParser:
                     logger.debug(f"Attempting to repair malformed JSON: {str(e)[:100]}")
                     # Create new instance for this repair (jsonrepair modifies internal state)
                     repairer = JsonRepair()
-                    repaired = repairer.jsonrepair(json_str)
+                    repaired = repairer.jsonrepair(json_str_cleaned)  # Use cleaned version with trailing commas removed
                     data = json.loads(repaired)
                     logger.debug("Successfully repaired and parsed JSON")
                 except Exception as repair_error:
@@ -249,6 +252,51 @@ class LLMResponseParser:
                 elif char == '/' and i + 1 < len(line) and line[i+1] == '/' and not in_string:
                     # Found // comment outside string, skip rest of line
                     break
+                else:
+                    cleaned_line.append(char)
+                i += 1
+            
+            lines.append(''.join(cleaned_line))
+        
+        return '\n'.join(lines)
+    
+    def _remove_trailing_commas(self, json_str: str) -> str:
+        """
+        Remove trailing commas from JSON string.
+        Handles trailing commas in objects and arrays.
+        This is a common LLM error that breaks JSON parsing.
+        """
+        lines = []
+        in_string = False
+        escape_next = False
+        
+        for line in json_str.split('\n'):
+            cleaned_line = []
+            i = 0
+            while i < len(line):
+                char = line[i]
+                
+                if escape_next:
+                    cleaned_line.append(char)
+                    escape_next = False
+                elif char == '\\':
+                    cleaned_line.append(char)
+                    escape_next = True
+                elif char == '"' and not escape_next:
+                    in_string = not in_string
+                    cleaned_line.append(char)
+                elif not in_string:
+                    # Outside string - check for trailing comma patterns
+                    if char == ',':
+                        # Look ahead to see if next non-whitespace is } or ]
+                        j = i + 1
+                        while j < len(line) and line[j] in ' \t':
+                            j += 1
+                        if j < len(line) and line[j] in '}]':
+                            # This is a trailing comma, skip it
+                            i += 1
+                            continue
+                    cleaned_line.append(char)
                 else:
                     cleaned_line.append(char)
                 i += 1

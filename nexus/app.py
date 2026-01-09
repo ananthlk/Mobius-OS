@@ -4,7 +4,7 @@ import logging
 
 # --- VERBOSE LOGGING CONFIGURATION ---
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
     datefmt="%H:%M:%S"
 )

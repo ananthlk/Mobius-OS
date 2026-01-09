@@ -140,6 +140,10 @@ CRITICAL: Date Extraction and Inference:
    - This is CRITICAL: dos_date should NEVER remain null if visits are available
    - Suggest in timing_updates.dos_date
 
+CRITICAL: You are ONLY an INTERPRETER. You do NOT check for missing fields or determine completion status.
+- Missing fields and completion status are determined deterministically by the system, not by you.
+- Your ONLY job is to extract information from user input and suggest updates.
+
 Return JSON with this structure:
 {{
   "suggested_updates": {{
@@ -148,12 +152,10 @@ Return JSON with this structure:
     "timing_updates": {{"dos_date": "YYYY-MM-DD"}},
     "other_updates": {{}}
   }},
-  "completion": {{
-    "status": "COMPLETE" | "INCOMPLETE" | "NEEDS_INPUT",
-    "missing_fields": ["field1", "field2"]
-  }},
   "reasoning": "Brief explanation of what you extracted and why"
 }}
+
+NOTE: Do NOT include "completion" or "missing_fields" in your response. These are determined by the system.
 """
         return prompt
     
@@ -188,7 +190,8 @@ Return JSON with this structure:
             response_data = self._normalize_response_data(response_data)
             
             # Check if response has the expected top-level structure
-            if "suggested_updates" not in response_data or "completion" not in response_data:
+            # Note: "completion" is optional - we use deterministic CompletionChecker instead
+            if "suggested_updates" not in response_data:
                 # Backward compatibility: check for old format
                 if "updated_case_state" in response_data:
                     logger.warning("LLM returned old format (updated_case_state), converting to suggested_updates")
@@ -212,24 +215,39 @@ Return JSON with this structure:
                             if v is not None and k != "related_visits"
                         }
                     )
+                    # Add default completion if not present
+                    if "completion" not in response_data:
+                        completion = CompletionStatusModel(
+                            status=CompletionStatus.INCOMPLETE,
+                            missing_fields=[]
+                        )
+                        response_data["completion"] = completion.model_dump()
+                    
                     response_data = {
                         "suggested_updates": suggested_updates.model_dump(),
-                        "completion": response_data["completion"],
+                        "completion": response_data.get("completion", CompletionStatusModel(
+                            status=CompletionStatus.INCOMPLETE,
+                            missing_fields=[]
+                        ).model_dump()),
                         "reasoning": "Converted from old format"
                     }
                 else:
                     logger.warning(f"LLM returned partial response. Got keys: {list(response_data.keys())}")
                     # Try to construct response from partial data
                     suggested_updates = CaseStateUpdateSuggestion()
-                    completion = CompletionStatusModel(
-                        status=CompletionStatus.INCOMPLETE,
-                        missing_fields=[]
-                    )
+                    # Don't create completion here - it will be determined deterministically by CompletionChecker
                     response_data = {
                         "suggested_updates": suggested_updates.model_dump(),
-                        "completion": completion.model_dump(),
                         "reasoning": "Constructed from partial response"
                     }
+            
+            # Ensure completion field exists (will be overridden by deterministic checker)
+            if "completion" not in response_data:
+                completion = CompletionStatusModel(
+                    status=CompletionStatus.INCOMPLETE,
+                    missing_fields=[]
+                )
+                response_data["completion"] = completion.model_dump()
             
             return LLMInterpretResponse(**response_data)
         except LLMResponseValidationError:
