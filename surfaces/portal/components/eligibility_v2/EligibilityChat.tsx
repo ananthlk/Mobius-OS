@@ -134,14 +134,16 @@ export default function EligibilityChat({ caseId, sessionId, onMessageSent }: El
     }
 
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full bg-[var(--bg-primary)]">
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-4">
                 {messages.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center -mt-10">
-                        <h2 className="text-2xl font-normal mb-2">Eligibility Check</h2>
-                        <p className="text-[var(--text-secondary)] mb-8">
-                            Enter a patient MRN or ask about eligibility.
+                        <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+                            Eligibility Check
+                        </h2>
+                        <p className="text-sm text-[var(--text-secondary)] mb-8 max-w-md text-center">
+                            Start by asking about a patient's eligibility. For example: "Check eligibility for MRN123"
                         </p>
                     </div>
                 )}
@@ -219,38 +221,34 @@ export default function EligibilityChat({ caseId, sessionId, onMessageSent }: El
             </div>
 
             {/* Input Area */}
-            <div className="p-4 md:p-6 w-full max-w-4xl mx-auto border-t">
-                <div className="bg-[var(--bg-secondary)] rounded-full flex items-center px-2 py-2 focus-within:bg-[var(--bg-primary)] focus-within:shadow-md focus-within:ring-1 focus-within:ring-[var(--border-subtle)] transition-all">
-                    <form onSubmit={handleSend} className="flex-1 flex px-2">
-                        <textarea
-                            className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-[var(--text-primary)] placeholder-[var(--text-secondary)] resize-none overflow-hidden break-words"
-                            placeholder="Enter patient MRN or ask about eligibility..."
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            rows={1}
-                            style={{ minHeight: "40px", maxHeight: "120px" }}
-                            onInput={(e) => {
-                                const target = e.target as HTMLTextAreaElement;
-                                target.style.height = "auto";
-                                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter" && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSend(e);
-                                }
-                            }}
-                            disabled={loading}
-                        />
-                        <button
-                            type="submit"
-                            disabled={!input.trim() || loading}
-                            className="w-10 h-10 flex items-center justify-center rounded-full text-[var(--primary-blue)] hover:bg-[var(--primary-blue-light)] disabled:opacity-50 transition-colors"
-                        >
-                            <Send size={20} />
-                        </button>
-                    </form>
-                </div>
+            <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]/80 backdrop-blur-xl p-4">
+                <form onSubmit={handleSend} className="flex gap-3 max-w-4xl mx-auto">
+                    <input
+                        type="text"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder="Ask about patient eligibility..."
+                        disabled={loading}
+                        className="flex-1 px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]/20 focus:border-[var(--primary-blue)] transition-all"
+                    />
+                    <button
+                        type="submit"
+                        disabled={loading || !input.trim()}
+                        className="bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-3 rounded-[var(--radius-lg)] text-sm font-semibold hover:opacity-90 transition-colors shadow-[var(--shadow-md)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {loading ? (
+                            <>
+                                <div className="w-4 h-4 border-2 border-[var(--bg-primary)] border-t-transparent rounded-full animate-spin"></div>
+                                <span>Processing...</span>
+                            </>
+                        ) : (
+                            <>
+                                <Send size={16} />
+                                <span>Send</span>
+                            </>
+                        )}
+                    </button>
+                </form>
             </div>
         </div>
     );

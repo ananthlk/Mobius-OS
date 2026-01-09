@@ -26,16 +26,16 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
 
     if (loading) {
         return (
-            <div className="w-80 border-r p-4">
-                <div className="text-sm text-gray-500">Loading...</div>
+            <div className="h-full p-6 flex items-center justify-center">
+                <div className="text-sm text-[var(--text-secondary)]">Loading...</div>
             </div>
         );
     }
 
     if (!caseView) {
         return (
-            <div className="w-80 border-r p-4">
-                <div className="text-sm text-gray-500">No case data available</div>
+            <div className="h-full p-6 flex items-center justify-center">
+                <div className="text-sm text-[var(--text-secondary)]">No case data available</div>
             </div>
         );
     }
@@ -62,35 +62,35 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
     }
 
     return (
-        <div className="w-80 border-r p-4 overflow-y-auto">
+        <div className="h-full p-6 overflow-y-auto custom-scrollbar">
             {/* Case Progress */}
             <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Case Progress</h3>
+                <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">Case Progress</h3>
                 <div className="text-xs">
                     <div className="mb-1">
-                        <span className="font-medium">Status:</span>{" "}
-                        <span className="text-gray-600">{caseView.status || "INIT"}</span>
+                        <span className="font-medium text-[var(--text-primary)]">Status:</span>{" "}
+                        <span className="text-[var(--text-secondary)]">{caseView.status || "INIT"}</span>
                     </div>
                 </div>
             </div>
 
             {/* Payment Probability */}
             {scoreState && (
-                <div className="mb-6">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                <div className="mb-6 p-4 bg-[var(--bg-secondary)] rounded-[var(--radius-lg)] border border-[var(--border-subtle)]">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                         Payment Probability
                     </h3>
-                    <div className="text-2xl font-bold mb-1">
+                    <div className="text-2xl font-bold mb-1 text-[var(--text-primary)]">
                         {(scoreState.base_probability * 100).toFixed(1)}%
                     </div>
                     {scoreState.probability_interval && (
-                        <div className="text-xs text-gray-600 mb-2">
+                        <div className="text-xs text-[var(--text-secondary)] mb-2">
                             95% Confidence Interval:{" "}
                             {Math.round(scoreState.probability_interval.lower_bound * 100)}% -{" "}
                             {Math.round(scoreState.probability_interval.upper_bound * 100)}%
                         </div>
                     )}
-                    <div className="text-xs text-gray-600">
+                    <div className="text-xs text-[var(--text-secondary)]">
                         Confidence: {Math.round((scoreState.base_confidence || 0) * 100)}%
                         {scoreState.sample_size && (
                             <>
@@ -100,7 +100,7 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
                         )}
                     </div>
                     {scoreState.volatility && (
-                        <div className="text-xs text-gray-600 mt-1">
+                        <div className="text-xs text-[var(--text-secondary)] mt-1">
                             Volatility:{" "}
                             {scoreState.volatility.volatility_score < 0.3
                                 ? "Low"
@@ -114,10 +114,10 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
 
             {/* Status Indicator */}
             {scoreState && (
-                <div className="mb-6">
+                <div className="mb-6 p-3 bg-[var(--bg-secondary)] rounded-[var(--radius-lg)] border border-[var(--border-subtle)]">
                     <div className="flex items-center gap-2">
                         <div className={`w-3 h-3 rounded-full ${statusColor}`}></div>
-                        <span className="text-xs font-medium text-gray-700">{statusText}</span>
+                        <span className="text-xs font-medium text-[var(--text-primary)]">{statusText}</span>
                     </div>
                 </div>
             )}
@@ -125,23 +125,23 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
             {/* Probability Waterfall */}
             {scoreState && scoreState.backoff_path && scoreState.backoff_path.length > 0 && (
                 <div className="mb-6">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                         Probability Waterfall
                     </h3>
                     <div className="space-y-1 text-xs">
                         {scoreState.backoff_path.map((step: any, idx: number) => (
                             <div
                                 key={idx}
-                                className={`p-2 rounded border ${
+                                className={`p-2 rounded-[var(--radius-md)] border ${
                                     step.level === scoreState.backoff_level
-                                        ? "bg-blue-50 border-blue-300"
-                                        : "bg-gray-50 border-gray-200"
+                                        ? "bg-[var(--primary-blue-light)] border-[var(--primary-blue)]/30"
+                                        : "bg-[var(--bg-secondary)] border-[var(--border-subtle)]"
                                 }`}
                             >
-                                <div className="font-medium">
+                                <div className="font-medium text-[var(--text-primary)]">
                                     Level {step.level}: {step.dimensions_str || "Global"}
                                 </div>
-                                <div className="text-gray-600">
+                                <div className="text-[var(--text-secondary)]">
                                     n={step.sample_size}
                                     {step.probability !== null && step.probability !== undefined && (
                                         <>
@@ -166,14 +166,14 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
             {caseState.timing?.related_visits &&
                 caseState.timing.related_visits.length > 0 && (
                     <div className="mb-4">
-                        <p className="text-sm font-semibold text-gray-700 mb-2">
+                        <p className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                             Appointments & Visits
                         </p>
-                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                        <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
                             {caseState.timing.related_visits.map((visit: any, idx: number) => (
                                 <div
                                     key={idx}
-                                    className="text-xs p-2 rounded border bg-gray-50 border-gray-200"
+                                    className="text-xs p-2 rounded-[var(--radius-md)] border bg-[var(--bg-secondary)] border-[var(--border-subtle)]"
                                 >
                                     <div className="flex items-center justify-between mb-1">
                                         <span className="font-medium">
@@ -234,11 +234,11 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
             {/* Next Questions */}
             {caseView.next_questions && caseView.next_questions.length > 0 && (
                 <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">Next Questions</h3>
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">Next Questions</h3>
                     <div className="space-y-2 text-xs">
                         {caseView.next_questions.map((q: any, idx: number) => (
-                            <div key={idx} className="p-2 bg-blue-50 rounded border border-blue-200">
-                                <div className="text-gray-700">{q.text || q.formatted_text}</div>
+                            <div key={idx} className="p-2 bg-[var(--primary-blue-light)] rounded-[var(--radius-md)] border border-[var(--primary-blue)]/20">
+                                <div className="text-[var(--text-primary)]">{q.text || q.formatted_text}</div>
                             </div>
                         ))}
                     </div>
