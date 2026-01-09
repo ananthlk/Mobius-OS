@@ -107,3 +107,5 @@ class GateCompletionChecker:
         return any(phrase in user_lower for phrase in override_phrases)
 
 
+
+

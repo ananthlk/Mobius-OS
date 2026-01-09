@@ -40,12 +40,45 @@ You work iteratively, resolving one blocker at a time until the plan is ready fo
 3. A tool_registry with available tools and their capabilities
 4. A session_state with known_fields, user_preferences, and permissions
 
+**KNOWN_FIELDS**: This is a list of field names that the system knows about (e.g., ["patient_name", "dob", "insurance_name", "urgency"]). These fields have been extracted from user messages or system operations.
+
+**KNOWN_CONTEXT**: This is a dictionary with actual values for known fields and other context (e.g., {"patient_name": "John Doe", "dob": "01/15/1980", "urgency": "high"}).
+
+**DETERMINISTIC_STEPS**: Some steps have already been processed deterministically (without LLM). These steps have:
+- readiness: "ready" (if complete) or "blocked" (if needs input)
+- No blockers (if ready)
+- Tool already selected (or None if no tool needed)
+- These steps are COMPLETE and should NOT be regenerated
+
+**STEPS_NEEDING_LLM**: This is a list of step IDs that still need LLM processing. You should focus ONLY on these steps.
+
+**MOST_RECENT_BOUND_PLAN**: This is the most up-to-date bound plan spec, including deterministic steps that were just processed. This represents the CURRENT state of the plan.
+
+**YOUR RESPONSIBILITY**: 
+- You MUST check KNOWN_FIELDS and KNOWN_CONTEXT before marking anything as "missing"
+- You MUST update your blockers based on what's actually known vs missing
+- You MUST NOT ask for information that's already in KNOWN_FIELDS unless you need the actual value and it's not in KNOWN_CONTEXT
+- You MUST NOT generate blockers for steps in DETERMINISTIC_STEPS with readiness="ready"
+- You MUST NOT regenerate steps that are already complete - preserve their status from MOST_RECENT_BOUND_PLAN
+- You MUST only process steps listed in STEPS_NEEDING_LLM
+- When creating your bound plan spec, merge with MOST_RECENT_BOUND_PLAN, updating only steps in STEPS_NEEDING_LLM
+
 Your goal: Create a BoundPlanSpec_v1 that:
 - Maps each step to a specific tool (or marks as human_required)
-- Identifies blockers preventing execution
-- Requests missing information in priority order (one at a time)""",
+- Identifies blockers preventing execution (based on ACTUAL missing information)
+- Requests missing information in priority order (one at a time)
+- Tracks what's known vs what's needed
+- Preserves the status of steps already processed deterministically""",
         
         "ANALYSIS": """Analyze the draft plan and create a BoundPlanSpec_v1.
+
+**CRITICAL: INFORMATION TRACKING**
+You MUST actively track what information is KNOWN vs MISSING:
+1. Review KNOWN_FIELDS and KNOWN_CONTEXT carefully - this is what the system already knows
+2. Compare against what each step requires
+3. Only mark information as "missing" if it's NOT in KNOWN_FIELDS or KNOWN_CONTEXT
+4. If information was mentioned in the conversation but not explicitly provided, mark confidence as "low" but don't ask again unless critical
+5. Update your blockers based on the CURRENT state of known information
 
 For EACH step:
 1. **Tool Matching**: Find the best matching tool from tool_registry
@@ -55,17 +88,17 @@ For EACH step:
    - If step requires human judgment, mark as human_required
 
 2. **Blocker Detection**: Identify blockers in priority order:
-   - missing_preference: User preference needed (e.g., communication method)
-   - missing_permission: Permission needed (e.g., patient communication)
+   - missing_preference: User preference needed (e.g., communication method) - ONLY if not in KNOWN_CONTEXT
+   - missing_permission: Permission needed (e.g., patient communication) - ONLY if not in KNOWN_CONTEXT
    - tool_gap: No tool available for step
    - tool_ambiguity: Multiple tools match, need selection
-   - missing_information: Required data missing (e.g., patient_id, DOB)
-   - timeline_risk: Timeline constraints may not be met
+   - missing_information: Required data missing (e.g., patient_id, DOB) - ONLY if NOT in KNOWN_FIELDS
+   - timeline_risk: Timeline constraints may not be met - check KNOWN_CONTEXT for urgency/deadlines
    - human_required: Step requires human judgment/approval
    - other: Other blockers
 
 3. **Plan Readiness**: Determine status:
-   - READY_FOR_COMPILATION: No critical blockers, all required steps have tools
+   - READY_FOR_COMPILATION: No critical blockers, all required steps have tools, all required info is in KNOWN_FIELDS
    - NEEDS_INPUT: Has blockers that need user input
    - BLOCKED: Critical blocker (tool_gap on required step, policy_conflict)
 
@@ -74,6 +107,22 @@ For EACH step:
    - step_id: Which step has the blocker
    - message: User-friendly question
    - writes_to: List of field names this input will populate
+   - IMPORTANT: Don't ask for information that's already in KNOWN_FIELDS or KNOWN_CONTEXT
+
+**INFORMATION TRACKING RULES:**
+- Before marking any information as "missing", check KNOWN_FIELDS and KNOWN_CONTEXT
+- If a field is in KNOWN_FIELDS, assume it's available (even if value is not shown in context)
+- If information was mentioned but not extracted (low confidence), you may still ask but mark priority lower
+- Always reference what you know vs what you need
+
+**DETERMINISTIC STEPS RULES:**
+- Review DETERMINISTIC_STEPS and MOST_RECENT_BOUND_PLAN before generating your response
+- For steps in DETERMINISTIC_STEPS with readiness="ready", preserve their status exactly as shown
+- Do NOT add blockers for steps that are already marked as ready
+- Do NOT regenerate steps that are complete - use the deterministic result
+- Only process steps listed in STEPS_NEEDING_LLM
+- When merging your results, start with MOST_RECENT_BOUND_PLAN and update only steps in STEPS_NEEDING_LLM
+- Preserve the readiness status and tool selections from deterministic steps
 
 Return BoundPlanSpec_v1 JSON.""",
         
@@ -155,7 +204,10 @@ Return BoundPlanSpec_v1 JSON.""",
             "Only one next_input_request (highest priority blocker)",
             "selected_tool must exist in tool_registry if non-null",
             "Prioritize blockers in order: missing_preference, missing_permission, tool_gap, tool_ambiguity, missing_information, timeline_risk, human_required, other",
-            "Be specific about what information is needed"
+            "Be specific about what information is needed",
+            "CRITICAL: Check KNOWN_FIELDS and KNOWN_CONTEXT before marking anything as missing",
+            "CRITICAL: Do NOT ask for information that's already in KNOWN_FIELDS or KNOWN_CONTEXT",
+            "CRITICAL: Update blockers based on ACTUAL missing information, not assumptions"
         ],
         
         "GENERATION_CONFIG": {

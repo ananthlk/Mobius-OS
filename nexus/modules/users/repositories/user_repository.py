@@ -142,3 +142,5 @@ class UserRepository:
         role = await database.fetch_val(query, {"user_id": user_id})
         return role
 
+
+

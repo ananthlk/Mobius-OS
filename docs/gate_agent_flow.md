@@ -168,3 +168,5 @@ Format & Emit to UI
 - **LLM Service**: `nexus/services/gate/llm_service.py`
 - **Orchestrator**: `nexus/conductors/workflows/orchestrator.py` - Handles formatting and emission
 
+
+

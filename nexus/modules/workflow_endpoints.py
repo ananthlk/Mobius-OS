@@ -121,6 +121,14 @@ class UpdateDraftPlanRequest(BaseModel):
     goal: Optional[str] = None
     steps: Optional[List[Dict[str, Any]]] = None  # Full steps array (for reordering)
 
+class PatientInfoFormRequest(BaseModel):
+    form_type: str = "patient_info"
+    patient_name: Optional[str] = None
+    dob: Optional[str] = None
+    insurance_name: Optional[str] = None
+    insurance_id: Optional[str] = None
+    mrn: Optional[str] = None
+
 # --- Shaping Session Endpoints ---
 
 @router.post("/shaping/start")
@@ -541,6 +549,45 @@ async def planning_phase_cancel(session_id: int):
         return result
     except Exception as e:
         logger.error(f"Failed to cancel planning phase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/shaping/{session_id}/bounded-plan/patient-info")
+async def submit_patient_info_form(session_id: int, req: Dict[str, Any]):
+    """
+    Handle submission of patient information form.
+    Accepts both flat format (PatientInfoFormRequest) and nested format (with form_data).
+    """
+    from nexus.brains.planning_phase import planning_phase_brain
+    
+    try:
+        # Handle both formats: flat (PatientInfoFormRequest) or nested (with form_data)
+        if "form_data" in req and isinstance(req["form_data"], dict):
+            # Nested format from StructuredForm component
+            form_data = req["form_data"]
+        else:
+            # Flat format - convert to dict
+            form_data = {}
+            if req.get("patient_name"):
+                form_data["patient_name"] = req["patient_name"]
+            if req.get("dob"):
+                form_data["dob"] = req["dob"]
+            if req.get("insurance_name"):
+                form_data["insurance_name"] = req["insurance_name"]
+            if req.get("insurance_id"):
+                form_data["insurance_id"] = req["insurance_id"]
+            if req.get("mrn"):
+                form_data["mrn"] = req["mrn"]
+        
+        logger.debug(f"[workflow_endpoints.submit_patient_info_form] ENTRY | session_id={session_id}, fields={list(form_data.keys())}")
+        
+        result = await planning_phase_brain.handle_patient_info_form_submission(
+            session_id=session_id,
+            form_data=form_data
+        )
+        
+        return result
+    except Exception as e:
+        logger.error(f"Failed to submit patient info form: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

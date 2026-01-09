@@ -86,3 +86,5 @@ class SessionManager:
 
 # Singleton instance
 session_manager = SessionManager()
+
+

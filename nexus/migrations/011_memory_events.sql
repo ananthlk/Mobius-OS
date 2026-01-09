@@ -13,4 +13,4 @@ CREATE TABLE IF NOT EXISTS memory_events (
     CONSTRAINT fk_session_id FOREIGN KEY (session_id) REFERENCES shaping_sessions (id)
 );
 
-CREATE INDEX idx_memory_events_session_bucket ON memory_events(session_id, bucket_type);
+CREATE INDEX IF NOT EXISTS idx_memory_events_session_bucket ON memory_events(session_id, bucket_type);

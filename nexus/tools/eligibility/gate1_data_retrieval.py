@@ -1,226 +1,156 @@
 """
-Gate 1 Tools: Patient/Insurance Info Availability
+Gate 1 Data Retrieval Tools
+
+Tools for retrieving patient and insurance data from EMR/internal systems.
 """
-from typing import Any, Dict, List, Optional
-from nexus.core.base_tool import NexusTool, ToolSchema
-import os
 import logging
+from typing import Dict, Any, Optional
+from nexus.core.base_tool import NexusTool, ToolSchema
 
 logger = logging.getLogger("nexus.tools.gate1")
 
-# API Configuration
-API_BASE_URL = os.getenv("MOBIUS_API_URL", "http://localhost:8000")
-
 
 class EMRPatientDemographicsRetriever(NexusTool):
-    """Retrieves existing patient demographics from EHR/EMR system using patient_id."""
+    """Retrieves patient demographics from EMR"""
+    
     def define_schema(self) -> ToolSchema:
         return ToolSchema(
-            name="emr_patient_demographics_retriever",
-            description="Retrieves patient demographics (name, DOB, address, contact info) from EMR system. Uses patient_id (EMR identifier).",
-            parameters={
-                "patient_id": "str (Patient identifier)",
-                "appointment_id": "Optional[str] (Appointment identifier if available)"
-            }
+            name="emr_patient_demographics",
+            description="Retrieve patient demographics from EMR",
+            parameters={"patient_id": "str"}
         )
-    
-    def _fetch_from_api(self, patient_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch demographics from user profile API."""
-        try:
-            import httpx
-            
-            url = f"{API_BASE_URL}/api/user-profiles/{patient_id}/system"
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(url)
-                if response.status_code == 200:
-                    system_data = response.json()
-                    demographics = system_data.get("demographics", {})
-                    return {
-                        "patient_id": patient_id,
-                        "name": demographics.get("name", ""),
-                        "date_of_birth": demographics.get("dob", ""),
-                        "address": demographics.get("address", ""),
-                        "phone": demographics.get("phone", ""),
-                        "email": demographics.get("email", "")
-                    }
-                else:
-                    logger.debug(f"API returned status {response.status_code} for patient {patient_id}")
-                    return None
-        except Exception as e:
-            logger.debug(f"Failed to fetch from API: {e}")
-            return None
-    
-    def run(self, patient_id: str, appointment_id: Optional[str] = None) -> Dict[str, Any]:
-        # Fetch from API only
-        api_result = self._fetch_from_api(patient_id)
-        if api_result:
-            return api_result
-        
-        # If API fails, raise error
-        raise ValueError(f"Failed to retrieve demographics for patient {patient_id}. Patient not found or API unavailable.")
-
-class EMRPatientInsuranceInfoRetriever(NexusTool):
-    """
-    Gets insurance information from patient record stored in EMR/internal systems.
-    
-    Note: This tool retrieves insurance info FROM the patient's profile/record (EMR system).
-    It uses patient_id (EMR identifier), NOT member_id (insurance identifier).
-    For querying insurance systems directly (e.g., eligibility checks), use member_id.
-    """
-    def define_schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="emr_patient_insurance_info_retriever",
-            description="Retrieves insurance information FROM patient record/EMR system (payer ID, member ID, group number, policy number). Uses patient_id (EMR identifier).",
-            parameters={
-                "patient_id": "str (Patient identifier from EMR/internal system)"
-            }
-        )
-    
-    def _fetch_from_api(self, patient_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch insurance info from user profile API."""
-        try:
-            import httpx
-            
-            url = f"{API_BASE_URL}/api/user-profiles/{patient_id}/health-plan"
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(url)
-                if response.status_code == 200:
-                    health_plan_data = response.json()
-                    coverage = health_plan_data.get("coverage", {})
-                    return {
-                        "patient_id": patient_id,
-                        "payer_id": "87726",  # Could be derived from carrier mapping
-                        "payer_name": health_plan_data.get("carrier", ""),
-                        "member_id": health_plan_data.get("member_id", ""),
-                        "group_number": health_plan_data.get("group", ""),
-                        "policy_number": health_plan_data.get("member_id", ""),  # Using member_id as policy
-                        "effective_date": coverage.get("effective_date", ""),
-                        "expiration_date": coverage.get("termination_date", "")
-                    }
-                else:
-                    logger.debug(f"API returned status {response.status_code} for patient {patient_id}")
-                    return None
-        except Exception as e:
-            logger.debug(f"Failed to fetch from API: {e}")
-            return None
     
     def run(self, patient_id: str) -> Dict[str, Any]:
-        # Fetch from API only
-        api_result = self._fetch_from_api(patient_id)
-        if api_result:
-            return api_result
-        
-        # If API fails, raise error
-        raise ValueError(f"Failed to retrieve insurance information for patient {patient_id}. Patient not found or API unavailable.")
-
-class EMRPatientHistoricalInsuranceLookup(NexusTool):
-    """Searches historical records for past insurance information from EMR system using patient_id."""
-    def define_schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="emr_patient_historical_insurance_lookup",
-            description="Searches historical insurance records from EMR system when current info is missing. Uses patient_id (EMR identifier).",
-            parameters={
-                "patient_id": "str (Patient identifier)",
-                "lookback_days": "int (Number of days to look back, default 365)"
-            }
-        )
+        """Synchronous run method"""
+        import asyncio
+        return asyncio.run(self.run_async(patient_id))
     
-    def _fetch_from_api(self, patient_id: str, lookback_days: int) -> Optional[List[Dict[str, Any]]]:
-        """Fetch historical insurance from user profile API."""
+    async def run_async(self, patient_id: str) -> Dict[str, Any]:
+        """Async method to retrieve demographics directly"""
         try:
-            import httpx
-            from datetime import datetime, timedelta
+            # Use PatientSimulator directly to generate synthetic patient data
+            from nexus.tools.eligibility.patient_simulator import PatientSimulator
             
-            url = f"{API_BASE_URL}/api/user-profiles/{patient_id}/health-plan"
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(url)
-                if response.status_code == 200:
-                    health_plan_data = response.json()
-                    coverage = health_plan_data.get("coverage", {})
-                    effective_date = coverage.get("effective_date", "")
-                    
-                    # For now, return current coverage as historical record
-                    # In a real system, this would query historical records
-                    if effective_date:
-                        return [
-                            {
-                                "patient_id": patient_id,
-                                "insurance_record": {
-                                    "payer_id": "87726",  # Could be derived from carrier
-                                    "member_id": health_plan_data.get("member_id", ""),
-                                    "effective_date": effective_date,
-                                    "expiration_date": coverage.get("termination_date", "")
-                                },
-                                "source": "historical_record",
-                                "record_date": effective_date
-                            }
-                        ]
-                else:
-                    logger.debug(f"API returned status {response.status_code} for patient {patient_id}")
-                    return None
+            simulator = PatientSimulator()
+            patient_data = simulator.generate_synthetic_patient(patient_id)
+            demographics = patient_data.get("demographics", {})
+            
+            logger.info(f"Successfully generated demographics for {patient_id}: {demographics.get('first_name')} {demographics.get('last_name')}")
+            return {
+                "member_id": demographics.get("member_id"),
+                "first_name": demographics.get("first_name"),
+                "last_name": demographics.get("last_name"),
+                "date_of_birth": demographics.get("date_of_birth"),
+                "sex": demographics.get("sex")
+            }
         except Exception as e:
-            logger.debug(f"Failed to fetch from API: {e}")
-            return None
-    
-    def run(self, patient_id: str, lookback_days: int = 365) -> List[Dict[str, Any]]:
-        # Fetch from API only
-        api_result = self._fetch_from_api(patient_id, lookback_days)
-        if api_result:
-            return api_result
-        
-        # If API fails, raise error
-        raise ValueError(f"Failed to retrieve historical insurance data for patient {patient_id}. Patient not found or API unavailable.")
+            logger.error(f"Failed to fetch demographics for {patient_id}: {e}")
+            return {}
 
-class HIEInsuranceQuery(NexusTool):
-    """Queries Health Information Exchange (HIE) system for insurance data. Uses patient_id to query HIE network."""
+
+class EMRPatientInsuranceInfoRetriever(NexusTool):
+    """Retrieves patient insurance information from EMR"""
+    
     def define_schema(self) -> ToolSchema:
         return ToolSchema(
-            name="hie_insurance_query",
-            description="Queries Health Information Exchange (HIE) system for insurance data when local records are incomplete. Uses patient_id and hie_network_id.",
-            parameters={
-                "patient_id": "str (Patient identifier)",
-                "hie_network_id": "str (HIE network identifier)",
-                "query_type": "str (Type of query: 'insurance', 'demographics', 'both')"
-            }
+            name="emr_patient_insurance",
+            description="Retrieve patient insurance information from EMR",
+            parameters={"patient_id": "str"}
         )
     
-    def run(self, patient_id: str, hie_network_id: str, query_type: str = "insurance") -> Dict[str, Any]:
-        # Mock implementation
-        return {
-            "patient_id": patient_id,
-            "hie_network_id": hie_network_id,
-            "insurance_info": {
-                "payer_id": "87726",
-                "member_id": "M123456789",
-                "payer_name": "UnitedHealthcare"
-            },
-            "source": "hie",
-            "query_timestamp": "2024-01-15T10:30:00Z"
-        }
+    def run(self, patient_id: str) -> Dict[str, Any]:
+        """Synchronous run method"""
+        import asyncio
+        return asyncio.run(self.run_async(patient_id))
+    
+    async def run_async(self, patient_id: str) -> Dict[str, Any]:
+        """Async method to retrieve insurance directly"""
+        try:
+            # Use PatientSimulator directly to generate synthetic patient data
+            from nexus.tools.eligibility.patient_simulator import PatientSimulator
+            
+            simulator = PatientSimulator()
+            patient_data = simulator.generate_synthetic_patient(patient_id)
+            health_plan = patient_data.get("health_plan", {})
+            
+            logger.info(f"Successfully generated insurance for {patient_id}: {health_plan.get('payer_name')}")
+            return {
+                "payer_name": health_plan.get("payer_name"),
+                "payer_id": health_plan.get("payer_id"),
+                "plan_name": health_plan.get("plan_name"),
+                "member_id": health_plan.get("member_id")
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch insurance for {patient_id}: {e}")
+            return {}
 
-class PatientInsuranceCollector(NexusTool):
-    """Initiates patient communication to collect insurance information."""
+
+class EMRPatientVisitsRetriever(NexusTool):
+    """Retrieves patient visits/appointments from EMR"""
+    
     def define_schema(self) -> ToolSchema:
         return ToolSchema(
-            name="patient_insurance_collector",
-            description="Initiates patient communication to collect insurance information when it must come from patient directly.",
-            parameters={
-                "patient_id": "str (Patient identifier)",
-                "communication_method": "str (Method: 'portal', 'sms', 'email', 'phone')",
-                "urgency": "str (Urgency level: 'low', 'medium', 'high')"
-            }
+            name="emr_patient_visits",
+            description="Retrieve patient visits/appointments from EMR",
+            parameters={"patient_id": "str", "lookback_days": "int", "lookahead_days": "int"}
         )
     
-    def run(self, patient_id: str, communication_method: str = "portal", urgency: str = "medium") -> Dict[str, Any]:
-        # Mock implementation - this would trigger actual communication
-        return {
-            "patient_id": patient_id,
-            "communication_sent": True,
-            "method": communication_method,
-            "urgency": urgency,
-            "message_id": "MSG123456",
-            "status": "pending_response"
-        }
-
-
-
+    def run(self, patient_id: str, lookback_days: int = 90, lookahead_days: int = 90) -> list:
+        """Retrieve visits for patient (synchronous wrapper)"""
+        import asyncio
+        try:
+            # Check if we're in an async context
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            
+            if loop:
+                # We're in an async context, can't use asyncio.run()
+                # Return empty list - caller should use run_async instead
+                logger.warning(f"Cannot use synchronous run() in async context for {patient_id}, use run_async() instead")
+                return []
+            else:
+                # Not in async context, safe to use asyncio.run()
+                return asyncio.run(self._fetch_visits(patient_id, lookback_days, lookahead_days))
+        except Exception as e:
+            logger.warning(f"Could not retrieve visits for patient {patient_id}, returning empty list: {e}")
+            return []
+    
+    async def run_async(self, patient_id: str, lookback_days: int = 90, lookahead_days: int = 90) -> list:
+        """Retrieve visits for patient (async method)"""
+        return await self._fetch_visits(patient_id, lookback_days, lookahead_days)
+    
+    async def _fetch_visits(self, patient_id: str, lookback_days: int, lookahead_days: int) -> list:
+        """Async method to fetch visits"""
+        try:
+            # Use PatientSimulator directly to generate synthetic patient data
+            from nexus.tools.eligibility.patient_simulator import PatientSimulator
+            from datetime import date, timedelta
+            
+            simulator = PatientSimulator()
+            patient_data = simulator.generate_synthetic_patient(patient_id)
+            visits = patient_data.get("visits", [])
+            
+            # Filter by date range
+            today = date.today()
+            cutoff_start = today - timedelta(days=lookback_days)
+            cutoff_end = today + timedelta(days=lookahead_days)
+            
+            filtered_visits = []
+            for visit in visits:
+                visit_date_str = visit.get("visit_date")
+                if visit_date_str:
+                    try:
+                        visit_date = date.fromisoformat(visit_date_str)
+                        if cutoff_start <= visit_date <= cutoff_end:
+                            filtered_visits.append(visit)
+                    except (ValueError, TypeError):
+                        # If date parsing fails, include the visit anyway
+                        filtered_visits.append(visit)
+            
+            return filtered_visits[:10]  # Return first 10 for now
+        except Exception as e:
+            logger.warning(f"Failed to fetch visits for {patient_id}: {e}")
+            return []

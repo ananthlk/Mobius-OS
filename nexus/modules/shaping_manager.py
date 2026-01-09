@@ -3,7 +3,6 @@ import asyncio
 from typing import List, Optional, Dict, Any
 import json
 from dataclasses import asdict
-from nexus.modules.database import database
 from nexus.brains.consultant import consultant_brain  # Only for decide_strategy
 from nexus.brains.gate_engine import GateEngine
 from nexus.brains.planner import planner_brain
@@ -13,6 +12,7 @@ from nexus.core.gate_models import GateConfig, GateDef, GateState, GateValue, St
 from nexus.modules.prompt_manager import prompt_manager
 from nexus.services.gate.state_repository import GateStateRepository
 from nexus.services.gate.config_loader import GateConfigLoader
+from nexus.services.shaping.session_repository import ShapingSessionRepository
 
 class ShapingManager:
     """
@@ -28,6 +28,7 @@ class ShapingManager:
         self.gate_engine = GateEngine()
         self.state_repository = GateStateRepository()
         self.config_loader = GateConfigLoader()
+        self.session_repository = ShapingSessionRepository()
     
     async def _load_gate_state(self, session_id: int) -> Optional[GateState]:
         """Load gate state from database. Delegates to GateStateRepository."""
@@ -445,15 +446,8 @@ class ShapingManager:
         thought_content = None
         
         # 4. Create Session in DB to get ID
-        query = """
-        INSERT INTO shaping_sessions 
-        (user_id, status, transcript, draft_plan, consultant_strategy, rag_citations, consultant_iteration_count, max_iterations, gate_state)
-        VALUES (:user_id, 'GATHERING', :transcript, :draft_plan, :strategy, :citations, :iter_count, :max_iter, :gate_state)
-        RETURNING id
-        """
-        
         # Prepare gate_state for insertion
-        gate_state_json = "{}"
+        gate_state_dict = None
         if 'initial_gate_state' in locals():
             gate_state_dict = {
                 "summary": initial_gate_state.summary,
@@ -471,27 +465,26 @@ class ShapingManager:
                     "next_query": initial_gate_state.status.next_query
                 }
             }
-            gate_state_json = json.dumps(gate_state_dict)
         
-        session_id = await database.fetch_val(query=query, values={
-            "user_id": user_id,
-            "transcript": json.dumps(transcript),
-            "draft_plan": json.dumps(plan_data) if plan_data else "{}",
-            "strategy": strategy_result["strategy"],
-            "citations": json.dumps(strategy_result["context"].get("manuals", [])),
-            "iter_count": 1,  # First iteration
-            "max_iter": 15,  # Default max iterations
-            "gate_state": gate_state_json
-        })
+        session_id = await self.session_repository.create(
+            user_id=user_id,
+            strategy=strategy_result["strategy"],
+            transcript=transcript,
+            draft_plan=plan_data,
+            rag_citations=strategy_result["context"].get("manuals", []),
+            gate_state=gate_state_dict,
+            iteration_count=1,  # First iteration
+            max_iterations=15  # Default max iterations
+        )
         
         # Set initial active_agent to 'gate'
-        await database.execute(
-            "UPDATE shaping_sessions SET active_agent = 'gate' WHERE id = :id",
-            {"id": session_id}
-        )
+        await self.session_repository.update_active_agent(session_id, 'gate')
         
         # NOW we have a session. Configure Agent & Stream backlog.
         agent.set_session_id(session_id)
+        
+        # Store initial query as OUTPUT event for timestamp tracking
+        await agent.emit("OUTPUT", {"role": "user", "content": initial_query})
         
         # Emit the thoughts that led here (Backfilling the stream)
         await agent.emit("THINKING", {
@@ -564,11 +557,7 @@ class ShapingManager:
             
             # Also explicitly persist here for immediate availability (BaseAgent does this too, but this ensures it)
             try:
-                update_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
-                await database.execute(query=update_query, values={
-                    "draft": json.dumps(initial_draft),
-                    "id": session_id
-                })
+                await self.session_repository.update_draft_plan(session_id, initial_draft)
                 logging.debug(f"[SHAPING_MANAGER] Persisted initial draft plan to database")
             except Exception as e:
                 logging.error(f"[SHAPING_MANAGER] Failed to persist initial draft plan: {e}", exc_info=True)
@@ -592,11 +581,7 @@ class ShapingManager:
             gate_state = await self._load_gate_state(session_id)
             
             # Get strategy from session
-            strategy_query = "SELECT consultant_strategy FROM shaping_sessions WHERE id = :id"
-            strategy_row = await database.fetch_one(strategy_query, {"id": session_id})
-            strategy = "TABULA_RASA"
-            if strategy_row:
-                strategy = dict(strategy_row).get("consultant_strategy", "TABULA_RASA")
+            strategy = await self.session_repository.get_strategy(session_id) or "TABULA_RASA"
             
             # CONTRACT: Gate Agent retrieves template and passes it to planner
             template = await self._retrieve_template_for_planner(strategy=strategy, domain="eligibility")
@@ -619,11 +604,7 @@ class ShapingManager:
             })
             
             # Persist
-            update_query = "UPDATE shaping_sessions SET draft_plan = :draft WHERE id = :id"
-            await database.execute(query=update_query, values={
-                "draft": json.dumps(new_draft), 
-                "id": session_id
-            })
+            await self.session_repository.update_draft_plan(session_id, new_draft)
             await agent.emit("PERSISTENCE", {"action": "UPDATE_SESSION", "id": session_id})
             
         except Exception as e:
@@ -779,10 +760,7 @@ class ShapingManager:
                     "completion_status": completion_status
                 })
                 
-                await database.execute(
-                    "UPDATE shaping_sessions SET transcript = :transcript, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
-                    {"transcript": json.dumps(transcript), "id": session_id}
-                )
+                await self.session_repository.update_transcript(session_id, transcript)
                 
                 # Emit HANDOFF artifact
                 gate_state = await self._load_gate_state(session_id)
@@ -799,6 +777,13 @@ class ShapingManager:
                             "template": template
                         }
                     )
+                    # Save draft plan to database after handoff/confirmation
+                    try:
+                        await self.session_repository.update_draft_plan(session_id, draft_plan)
+                        logging.debug(f"[SHAPING_MANAGER] Saved draft plan to database after handoff | gates_count={len(draft_plan.get('gates', []))}")
+                    except Exception as e:
+                        logging.error(f"[SHAPING_MANAGER] Failed to save draft plan to database: {e}", exc_info=True)
+                    
                     await agent.emit("ARTIFACTS", {
                         "type": "HANDOFF",
                         "data": {
@@ -1367,6 +1352,13 @@ class ShapingManager:
                         "template": template
                     }
                 )
+                # Save draft plan to database after problem statement update
+                try:
+                    await self.session_repository.update_draft_plan(session_id, updated_draft)
+                    logging.debug(f"[SHAPING_MANAGER] Saved draft plan to database after problem statement update | gates_count={len(updated_draft.get('gates', []))}")
+                except Exception as e:
+                    logging.error(f"[SHAPING_MANAGER] Failed to save draft plan to database: {e}", exc_info=True)
+                
                 await agent.emit("ARTIFACTS", {
                     "type": "DRAFT_PLAN",
                     "data": updated_draft,
@@ -1471,68 +1463,45 @@ class ShapingManager:
         """
         agent = BaseAgent(session_id=session_id)
         
-        # 2. Fetch current state (handle missing columns gracefully if migration not run)
-        try:
-            select_query = "SELECT transcript, rag_citations, consultant_iteration_count, max_iterations, draft_plan FROM shaping_sessions WHERE id = :id"
-            row = await database.fetch_one(query=select_query, values={"id": session_id})
-            if not row:
-                return
-            
-            transcript = json.loads(row["transcript"] or "[]")
-            
-            # Check if this is a button click that was already saved by conversational agent
-            # If the last message is a user message with original_value matching this content, skip duplicate
-            if role == "user" and transcript:
-                last_msg = transcript[-1]
-                if (last_msg.get("role") == "user" and 
-                    last_msg.get("original_value") == content and
-                    last_msg.get("content") != content):  # Button label was saved, but we have the category value
-                    # Update the last message to use the category value for processing
-                    # But keep the button label for display
-                    logging.debug(f"[SHAPING_MANAGER] Button click detected: updating last message to use category value '{content}' for processing")
-                    # Ensure original_value is set correctly (in case it wasn't set by conversational agent)
-                    if not last_msg.get("original_value"):
-                        last_msg["original_value"] = content
-                        # Update transcript in database to persist the fix
-                        await database.execute(
-                            "UPDATE shaping_sessions SET transcript = :transcript WHERE id = :id",
-                            {"transcript": json.dumps(transcript), "id": session_id}
-                        )
-                    # Don't add duplicate - the button label is already in transcript
-                    # But we need to process the category value, so continue with gate engine
-                else:
-                    # Regular message or button label not yet saved - add to transcript
-                    # 1. Stream the Output intent immediately (Hot Path) - only if not already emitted
-                    await agent.emit("OUTPUT", {"role": role, "content": content})
-                    transcript.append({"role": role, "content": content, "timestamp": "now"})
+        # 2. Fetch current state using repository
+        transcript = await self.session_repository.get_transcript(session_id)
+        if transcript is None:
+            return
+        
+        # Check if this is a button click that was already saved by conversational agent
+        # If the last message is a user message with original_value matching this content, skip duplicate
+        if role == "user" and transcript:
+            last_msg = transcript[-1]
+            if (last_msg.get("role") == "user" and 
+                last_msg.get("original_value") == content and
+                last_msg.get("content") != content):  # Button label was saved, but we have the category value
+                # Update the last message to use the category value for processing
+                # But keep the button label for display
+                logging.debug(f"[SHAPING_MANAGER] Button click detected: updating last message to use category value '{content}' for processing")
+                # Ensure original_value is set correctly (in case it wasn't set by conversational agent)
+                if not last_msg.get("original_value"):
+                    last_msg["original_value"] = content
+                    # Update transcript in database to persist the fix
+                    await self.session_repository.update_transcript(session_id, transcript)
+                # Don't add duplicate - the button label is already in transcript
+                # But we need to process the category value, so continue with gate engine
             else:
-                # System message or first message - always emit and add
-                # 1. Stream the Output intent immediately (Hot Path)
+                # Regular message or button label not yet saved - add to transcript
+                # 1. Stream the Output intent immediately (Hot Path) - only if not already emitted
                 await agent.emit("OUTPUT", {"role": role, "content": content})
                 transcript.append({"role": role, "content": content, "timestamp": "now"})
-            rag_data = json.loads(row["rag_citations"] or "[]")
-            
-            # Get iteration tracking (with defaults if columns don't exist)
-            # Convert to dict for safe access, then use .get()
-            row_dict = dict(row)
-            iteration_count = row_dict.get("consultant_iteration_count", 0)
-            max_iterations = row_dict.get("max_iterations", 15)
-            
-        except Exception as e:
-            # Columns don't exist - use fallback query
-            logging.warning(f"Migration columns not found, using fallback query: {e}")
-            select_query = "SELECT transcript, rag_citations, draft_plan FROM shaping_sessions WHERE id = :id"
-        row = await database.fetch_one(query=select_query, values={"id": session_id})
-        if not row:
-            return
-
-        transcript = json.loads(row["transcript"])
-        transcript.append({"role": role, "content": content, "timestamp": "now"})
-        rag_data = json.loads(row["rag_citations"] or "[]")
+        else:
+            # System message or first message - always emit and add
+            # 1. Stream the Output intent immediately (Hot Path)
+            await agent.emit("OUTPUT", {"role": role, "content": content})
+            transcript.append({"role": role, "content": content, "timestamp": "now"})
         
-        # Default values when columns don't exist
-        iteration_count = 0
-        max_iterations = 15
+        rag_data = await self.session_repository.get_rag_citations(session_id)
+        
+        # Get iteration tracking
+        iteration_info = await self.session_repository.get_iteration_info(session_id)
+        iteration_count = iteration_info.get("iteration_count", 0)
+        max_iterations = iteration_info.get("max_iterations", 15)
         
         # --- 3. CHECK ITERATION LIMIT ---
         
@@ -1541,8 +1510,7 @@ class ShapingManager:
                 "message": f"Iteration limit reached ({max_iterations}). Stopping Consultant loop and using best available plan."
             })
             # Extract best plan from current state and hand off
-            row_dict = dict(row)
-            current_plan = json.loads(row_dict.get("draft_plan", "{}") or "{}")
+            current_plan = await self.session_repository.get_draft_plan(session_id) or {}
             await agent.emit("ARTIFACTS", {
                 "type": "DRAFT_PLAN",
                 "data": current_plan,
@@ -1551,28 +1519,19 @@ class ShapingManager:
             logging.warning(f"Session {session_id} hit iteration limit ({max_iterations})")
             return
         
-        # Increment iteration count (skip if column doesn't exist)
-        try:
-            await database.execute(
-                "UPDATE shaping_sessions SET consultant_iteration_count = consultant_iteration_count + 1 WHERE id = :id",
-                {"id": session_id}
-            )
-        except Exception as e:
-            # Column doesn't exist yet (migration not run) - skip increment
-            logging.debug(f"Could not increment iteration count: {e}")
+        # Increment iteration count (repository handles missing column gracefully)
+        await self.session_repository.increment_iteration_count(session_id)
         
         # --- 4. GATE ENGINE EXECUTION ---
         await agent.emit("THINKING", {"message": "Processing your input..."})
 
         # A. Resolve Strategy and Load GateConfig
-        uid_query = "SELECT user_id, consultant_strategy FROM shaping_sessions WHERE id = :id"
-        session_row = await database.fetch_one(uid_query, {"id": session_id})
-        if not session_row:
+        user_and_strategy = await self.session_repository.get_user_and_strategy(session_id)
+        if not user_and_strategy:
             logging.error(f"Session {session_id} not found")
             return
-        session_row_dict = dict(session_row)
-        user_id = session_row_dict.get("user_id")
-        strategy = session_row_dict.get("consultant_strategy", "TABULA_RASA")
+        user_id = user_and_strategy.get("user_id")
+        strategy = user_and_strategy.get("consultant_strategy", "TABULA_RASA")
         
         # Load gate config
         gate_config = await self._load_gate_config(strategy, session_id=session_id)
@@ -1639,16 +1598,7 @@ class ShapingManager:
             await self._save_gate_state(session_id, gate_result.proposed_state)
         
         # Get RAG data from session for planner context
-        rag_query = "SELECT rag_citations FROM shaping_sessions WHERE id = :id"
-        rag_row = await database.fetch_one(rag_query, {"id": session_id})
-        rag_data = []
-        if rag_row:
-            rag_dict = dict(rag_row)
-            citations_str = rag_dict.get("rag_citations", "[]")
-            try:
-                rag_data = json.loads(citations_str) if isinstance(citations_str, str) else citations_str
-            except Exception:
-                rag_data = []
+        rag_data = await self.session_repository.get_rag_citations(session_id)
         
         # --- EMIT ARTIFACTS FOR LIVE BUILDER (After Each Gate Execution) ---
         # Every time user reacts, gate agent emits for live builder to capture and update
@@ -1669,6 +1619,13 @@ class ShapingManager:
                         "template": template  # CONTRACT: Gate Agent passes template to planner
                     }
                 )
+                
+                # Save draft plan to database after each gate interaction
+                try:
+                    await self.session_repository.update_draft_plan(session_id, updated_draft)
+                    logging.debug(f"[SHAPING_MANAGER] Saved draft plan to database after gate execution | gates_count={len(updated_draft.get('gates', []))}")
+                except Exception as e:
+                    logging.error(f"[SHAPING_MANAGER] Failed to save draft plan to database: {e}", exc_info=True)
                 
                 # Emit ARTIFACTS for live builder to update
                 await agent.emit("ARTIFACTS", {
@@ -1749,19 +1706,7 @@ class ShapingManager:
         
 
     async def get_session(self, session_id: int) -> Optional[Dict[str, Any]]:
-        query = "SELECT * FROM shaping_sessions WHERE id = :id"
-        row = await database.fetch_one(query=query, values={"id": session_id})
-        if not row:
-            return None
-        
-        session_data = dict(row)
-        for field in ["transcript", "draft_plan", "rag_citations"]:
-            if isinstance(session_data.get(field), str):
-                try:
-                    session_data[field] = json.loads(session_data[field])
-                except Exception:
-                    session_data[field] = [] if field == "transcript" else {} 
-        return session_data
+        return await self.session_repository.get(session_id)
 
     async def _log_activity(self, user_id: int, session_id: int, query: str):
         # Quick helper to feed the 'Recent Activity' sidebar

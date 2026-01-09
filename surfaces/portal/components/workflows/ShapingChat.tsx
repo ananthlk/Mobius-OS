@@ -8,6 +8,7 @@ import ThinkingContainer from "@/components/ThinkingContainer";
 import Tooltip from "@/components/Tooltip";
 import ActionButtons from "./ActionButtons";
 import FeedbackCapture from "@/components/FeedbackCapture";
+import StructuredForm from "./StructuredForm";
 
 interface Message {
     id: string;
@@ -40,6 +41,7 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
     const [explicitlyCollapsedIds, setExplicitlyCollapsedIds] = useState<Set<string>>(new Set()); // Track which thinking blocks are explicitly collapsed by user
     const [userOverriddenIds, setUserOverriddenIds] = useState<Set<string>>(new Set()); // Track containers user explicitly expanded after system collapse
     const [actionButtons, setActionButtons] = useState<any>(null);
+    const [activeForm, setActiveForm] = useState<any>(null); // Structured form data
     const [feedbackUIs, setFeedbackUIs] = useState<Map<number, number>>(new Map()); // memory_event_id -> message index
     const [latestSystemMessageId, setLatestSystemMessageId] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -275,6 +277,33 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                         const feedbackUIArtifacts = data.artifacts && Array.isArray(data.artifacts)
                             ? data.artifacts.filter((a: any) => a.type === 'FEEDBACK_UI')
                             : [];
+                        
+                        // Check for STRUCTURED_FORM artifacts
+                        const structuredFormArtifact = data.artifacts && Array.isArray(data.artifacts)
+                            ? data.artifacts.find((a: any) => a.type === 'STRUCTURED_FORM')
+                            : null;
+                        
+                        if (structuredFormArtifact) {
+                            console.log('[ShapingChat] Found STRUCTURED_FORM artifact:', structuredFormArtifact);
+                            setActiveForm({
+                                form_type: structuredFormArtifact.form_type || 'unknown',
+                                message: structuredFormArtifact.message || '',
+                                form_fields: structuredFormArtifact.form_fields || [],
+                                submit_button: structuredFormArtifact.submit_button || null,
+                                metadata: structuredFormArtifact.metadata || {}
+                            });
+                        } else {
+                            // Only clear form if we're sure there's no form artifact (not just on first load)
+                            // This prevents clearing the form during polling when it's still valid
+                            if (activeForm && data.artifacts && Array.isArray(data.artifacts)) {
+                                // Check if artifacts array exists but doesn't contain STRUCTURED_FORM
+                                const hasFormArtifact = data.artifacts.some((a: any) => a.type === 'STRUCTURED_FORM');
+                                if (!hasFormArtifact) {
+                                    console.log('[ShapingChat] No STRUCTURED_FORM artifact found, clearing active form');
+                                    setActiveForm(null);
+                                }
+                            }
+                        }
                         
                         // Load feedback for ALL system messages with memory_event_id (async, non-blocking)
                         if (data.transcript && Array.isArray(data.transcript)) {
@@ -569,6 +598,12 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
             timestamp: Date.now() 
         };
         
+        // Clear previous thinking container when new user message is sent
+        // Backend will filter thinking messages to only show those after this user message
+        setCurrentThinkingId(null);
+        setExpandedThinkingIds(new Set());
+        setUserOverriddenIds(new Set());
+        
         // Create thinking container immediately after user message
         const thinkingId = `thinking_${Date.now()}`;
         const thinkingMsg: Message = {
@@ -774,6 +809,33 @@ export default function ShapingChat({ initialQuery, onUpdate, onSessionUpdate, s
                                 sessionId={sessionId}
                                 onActionComplete={handleActionComplete}
                             />
+                        )}
+                        
+                        {/* Render structured form if present */}
+                        {activeForm && activeForm.form_fields && activeForm.form_fields.length > 0 && (
+                            <div className="w-full flex justify-start">
+                                <StructuredForm
+                                    formType={activeForm.form_type}
+                                    message={activeForm.message}
+                                    formFields={activeForm.form_fields}
+                                    submitButton={activeForm.submit_button}
+                                    sessionId={sessionId}
+                                    onSuccess={(result) => {
+                                        console.log('[ShapingChat] Form submitted successfully:', result);
+                                        // Clear the form after successful submission
+                                        setActiveForm(null);
+                                        // Optionally add a user message showing what was submitted
+                                        if (result.message) {
+                                            // The backend will handle adding the response to the transcript
+                                            // We just need to trigger a refresh
+                                        }
+                                    }}
+                                    onError={(error) => {
+                                        console.error('[ShapingChat] Form submission error:', error);
+                                        // Keep form visible on error so user can retry
+                                    }}
+                                />
+                            </div>
                         )}
                     </div>
 

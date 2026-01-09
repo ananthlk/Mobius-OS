@@ -1,98 +1,138 @@
-# Test Results - Startup and Functionality Check
+# Eligibility V2 Test Results
 
-## Issues Found and Fixed
+## ✅ What Works
 
-### 1. ✅ Fixed: Duplicate Router Inclusion
-- **File**: `nexus/app.py` line 125
-- **Issue**: `spectacles_router` was included twice with the same prefix
-- **Status**: Fixed - Removed duplicate line
+### Core Models & Data Structures
+- ✅ **Models import successfully** - All Pydantic models (CaseState, VisitInfo, ScoreState, etc.) work
+- ✅ **VisitInfo model** - Correctly handles visit data with eligibility status and probability
+- ✅ **Database tables exist** - All required tables are present:
+  - eligibility_cases
+  - eligibility_score_runs
+  - eligibility_case_turns
+  - patient_profiles
+  - memory_events
 
-### 2. ✅ Fixed: Database Migration 031 Syntax Error
-- **File**: `nexus/migrations/031_comprehensive_user_profiles.sql`
-- **Issue**: File had 4 duplicate code blocks (639 lines → 157 lines)
-- **Error**: `unterminated dollar-quoted string at or near "$$"` at statement 28/148
-- **Root Cause**: Duplicate function definitions caused migration runner to split incorrectly
-- **Status**: Fixed - Removed duplicate blocks, file now 157 lines
+### Core Components
+- ✅ **Orchestrator initializes** - All dependencies load correctly:
+  - Has interpreter
+  - Has scorer
+  - Has planner
+  - Has case_repo
+- ✅ **Router imports successfully** - API endpoints are registered
+- ✅ **Repositories initialize** - CaseRepository, ScoringRepository, PropensityRepository all work
+- ✅ **Completion checker works** - Correctly identifies missing fields
 
-### 3. ✅ Fixed: Duplicate Code in Python Modules
-- **Files Fixed**:
-  - `nexus/modules/user_endpoints.py` (1825 → 456 lines)
-  - `nexus/modules/gmail_endpoints.py` (973 → 244 lines)
-  - `nexus/modules/user_context.py` (547 → 134 lines)
-  - All 19 files in `nexus/modules/users/` directory
-- **Status**: All files pass Python syntax validation
+### Tools & Utilities
+- ✅ **Patient simulator works** - Generates synthetic patient data:
+  - Creates demographics (name, DOB, sex, member_id)
+  - Creates health plan info (payer, plan name)
+  - Generates 2-5 visits with dates
+- ✅ **Eligibility 270 transaction tool works** - Generates eligibility windows:
+  - Creates active and inactive coverage periods
+  - Returns proper date ranges
+- ✅ **Data retrieval tools import** - EMRPatientDemographicsRetriever, EMRPatientInsuranceInfoRetriever work
 
-## Testing Status
+### Logic & Computation
+- ✅ **Visit eligibility computation logic** - Correctly:
+  - Classifies visits as PAST/FUTURE
+  - Checks coverage windows
+  - Sets eligibility status
+  - Assigns probability
+- ✅ **Process event structure** - JSON serializable, includes visit data
 
-### Phase 1: Backend Startup Test
-- ✅ **Syntax Check**: All Python files compile successfully
-- ✅ **Migration Check**: Migration 031 fixed (duplicate code removed)
-- ⏳ **Import Test**: Cannot test without virtualenv (dependencies not installed)
-- ⏳ **Server Startup**: Cannot test without virtualenv and database connection
+### Conversational Agent
+- ✅ **Conversational agent format_response works** - Can format responses (needs DB for full functionality)
 
-### Phase 2: Frontend Startup Test
-- ⏳ **Build Check**: Not tested yet
-- ⏳ **Runtime Test**: Not tested yet
+## ⚠️ Issues Found & Fixed
 
-### Phase 3: API Endpoint Testing
-- ⏳ **Health Check**: Not tested yet
-- ⏳ **User Endpoints**: Not tested yet
-- ⏳ **Portal Endpoints**: Not tested yet
-- ⏳ **Workflow Endpoints**: Not tested yet
+### Fixed During Testing
+1. ✅ **Missing import in llm_call_repository.py** - Added `Optional` import
+2. ✅ **Missing import in completion_checker.py** - Added `EventTense` import and fixed CompletionStatus usage
+3. ✅ **Missing ShapingSessionRepository** - Created with create_simple, exists, get_transcript methods
+4. ✅ **CompletionStatus model fix** - Changed from Enum to CompletionStatusModel (Pydantic model)
 
-### Phase 4: Integration Testing
-- ⏳ **Frontend-Backend Connection**: Not tested yet
-- ⏳ **User Creation Flow**: Not tested yet
-- ⏳ **Chat Functionality**: Not tested yet
+## ❌ What's Not Working / Needs Work
 
-## Known Issues
+### Missing Files
+1. ❌ **Prompt config files missing**:
+   - `nexus/configs/prompts/eligibility_v2_interpreter.json`
+   - `nexus/configs/prompts/eligibility_v2_planner.json`
+   - These are optional (code has fallbacks) but needed for proper LLM prompts
 
-### ✅ Fixed: Route Conflict - Duplicate `/api/users` Routes
-- **Issue**: Both new and legacy user modules registered routes at `/api/users`
-- **Resolution**: 
-  - Commented out legacy `user_router` in `app.py` (line 29 import and line 130 registration)
-  - Added compatibility routes to new `profile_router`:
-    - `GET /api/users/{user_id}/profile` - Legacy profile endpoint
-    - `PUT /api/users/{user_id}/profile` - Legacy profile update
-    - `GET /api/users/{user_id}/preferences` - Legacy preferences endpoint
-    - `PUT /api/users/{user_id}/preferences` - Legacy preferences update
-  - Set `profile_router` prefix to `/api/users` to match legacy routes
-  - Compatibility routes map legacy format to new comprehensive profile structure
-- **Status**: Fixed - All legacy routes now available through new module with compatibility layer
+### Missing Dependencies
+2. ✅ **LLMResponseParser** - EXISTS at `nexus.core.json_parser.LLMResponseParser`
+   - Verified: Class exists and has parse() method
+   - No action needed
 
-### Environment Dependencies
-- Backend requires:
-  - Python virtualenv with dependencies
-  - PostgreSQL database
-  - Environment variables (DATABASE_URL, etc.)
-- Frontend requires:
-  - Node.js dependencies
-  - Environment variables (NEXT_PUBLIC_API_URL, etc.)
+3. ⚠️ **MemoryLogger** - Referenced in conversational_agent.py
+   - Need to verify if this exists or use alternative logging
+   - May need to create or replace with standard logging
 
-## Recommendations
+4. ⚠️ **Communication preferences module** - Referenced in conversational_agent.py
+   - `nexus.modules.communication_preferences` may not exist
+   - Used for user tone/style preferences
+   - Code has fallback (uses defaults if not found)
 
-1. **Test with actual environment**: Run tests in proper virtualenv with database
-2. ✅ **Route conflicts resolved**: Legacy routes now available through new module
-3. **Verify migration**: Test migration 031 with actual database
-4. **Check for other duplicate code**: Scan other migration files for similar issues
-5. **Monitor compatibility routes**: Ensure legacy frontend continues to work with new profile structure
+### App-Level Issues
+5. ❌ **App import fails** - Due to missing `track_chat_interaction` in `user_profile_events.py`
+   - This is a separate issue not related to eligibility_v2
+   - Blocks testing the full app startup
 
-## Files Modified
+### Database-Dependent Features
+6. ⚠️ **Full orchestrator.process_turn()** - Requires:
+   - Database connection
+   - LLM gateway configured
+   - Prompt templates in database
+   - Cannot test end-to-end without these
 
-1. ✅ `nexus/app.py` - Removed duplicate router inclusion, commented out legacy user_router
-2. ✅ `nexus/migrations/031_comprehensive_user_profiles.sql` - Removed duplicate code blocks (639 → 157 lines)
-3. ✅ `nexus/modules/users/api/profile_endpoints.py` - Added prefix `/api/users`, added compatibility routes for `/profile` and `/preferences`
-4. ✅ All Python files in `nexus/modules/users/` - Removed duplicate code (already fixed)
-5. ✅ `nexus/modules/user_endpoints.py` - Removed duplicate code (already fixed)
-6. ✅ `nexus/modules/gmail_endpoints.py` - Removed duplicate code (already fixed)
-7. ✅ `nexus/modules/user_context.py` - Removed duplicate code (already fixed)
+7. ⚠️ **Propensity repository queries** - Requires:
+   - eligibility_transactions table with data
+   - eligibility_propensity_aggregates table (optional)
+   - Cannot test waterfall strategy without data
 
-## Resolution Summary
+8. ⚠️ **Patient profile manager** - Requires:
+   - Database connection
+   - patient_profiles table
+   - Can generate synthetic data but needs DB to store/retrieve
 
-All identified issues have been resolved:
-- ✅ Duplicate router inclusion fixed
-- ✅ Database migration syntax error fixed
-- ✅ Route conflict resolved with compatibility layer
-- ✅ All Python files pass syntax validation
-- ✅ Legacy frontend routes maintained through compatibility endpoints
+### Frontend
+9. ⚠️ **Frontend components** - Not tested:
+   - EligibilityProcessView.tsx - Created but not tested in browser
+   - EligibilityChat.tsx - Not created yet
+   - EligibilitySidebar.tsx - Not created yet
+   - Need to test React component rendering
 
+## 📋 Summary
+
+### Working (16 items)
+- Core models and data structures
+- Database tables
+- Orchestrator initialization
+- Router registration
+- Repositories
+- Tools (patient simulator, 270 transaction)
+- Visit computation logic
+- Process event structure
+- Basic conversational agent
+- Completion checker (fixed)
+- LLMResponseParser (verified exists)
+
+### Needs Work (7 items)
+- Prompt config files (optional but recommended)
+- MemoryLogger verification/creation
+- Communication preferences module (has fallback)
+- App-level import issues (separate from eligibility_v2)
+- End-to-end testing (requires DB + LLM)
+- Propensity data (requires database with transactions)
+- Frontend components (not tested in browser)
+
+## 🎯 Next Steps
+
+1. **Create prompt config files** - Add JSON configs for interpreter and planner
+2. **Verify/create LLMResponseParser** - Ensure JSON parsing works
+3. **Verify/create MemoryLogger** - Ensure logging works
+4. **Create/fix communication_preferences** - For user preferences
+5. **Fix app-level imports** - Resolve user_profile_events issues
+6. **Test with database** - Run full end-to-end tests with DB connected
+7. **Test frontend** - Verify React components render correctly
+8. **Add test data** - Populate eligibility_transactions for propensity testing

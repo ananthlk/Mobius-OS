@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Mobius OS - Quick Thought Logging
+# Usage: MobiusOSLOG "Your message here"
+# Works from any directory
+
+# Find project root (resolve symlinks to actual script location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+# Resolve symlinks
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # If relative symlink, resolve relative to original directory
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
+
+# Configuration
+API_URL="${MOBIUS_API_URL:-http://localhost:8000}"
+USER_ID="${MOBIUS_USER_ID:-$(whoami)}"
+SESSION_LOG="$PROJECT_ROOT/.mobius_session_log.md"
+
+# Get message from arguments
+if [ -z "$1" ]; then
+    echo "📝 Enter your thought (or press Ctrl+C to cancel):"
+    read -r MESSAGE
+    if [ -z "$MESSAGE" ]; then
+        echo "❌ Empty message, nothing to log"
+        exit 1
+    fi
+else
+    # Join all arguments as the message
+    MESSAGE="$*"
+fi
+
+echo "💭 Logging thought to Mobius OS..."
+MSG_PREVIEW=$(echo "$MESSAGE" | head -c 100)
+if [ ${#MESSAGE} -gt 100 ]; then
+    echo "   Message: ${MSG_PREVIEW}..."
+else
+    echo "   Message: $MESSAGE"
+fi
+echo ""
+
+# Try to log via API first
+if command -v curl &> /dev/null; then
+    # URL encode the message
+    ENCODED_MESSAGE=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$MESSAGE" 2>/dev/null)
+    
+    if [ -n "$ENCODED_MESSAGE" ]; then
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "$API_URL/api/external/log-message?user_id=$(echo "$USER_ID" | sed 's/ /%20/g')&source=manual&role=user&content=$ENCODED_MESSAGE" \
+            2>/dev/null)
+    else
+        RESPONSE="000"
+    fi
+    
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    BODY=$(echo "$RESPONSE" | sed '$d')
+    
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        echo "✅ Logged to database via API"
+        echo "   (Will appear in next diary entry)"
+        exit 0
+    elif [ "$HTTP_CODE" = "000" ]; then
+        # Connection failed, fall back to file
+        echo "⚠️  API unavailable, logging to session file instead..."
+    else
+        echo "⚠️  API returned error ($HTTP_CODE), logging to session file instead..."
+    fi
+else
+    echo "⚠️  curl not found, logging to session file instead..."
+fi
+
+# Fallback: Append to session log file
+TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
+if [ ! -f "$SESSION_LOG" ]; then
+    cat > "$SESSION_LOG" << 'EOF'
+# Mobius OS Development Session Log
+
+This file captures thoughts and conversations during development sessions.
+The diary script will automatically include this in diary entries.
+
+## How to Use
+
+- Use `MobiusOSLOG "your message"` to log thoughts
+- Or manually edit this file
+- The diary will include entries after the last diary run
+
+## Logged Thoughts
+
+EOF
+fi
+
+# Append the message
+echo "" >> "$SESSION_LOG"
+echo "**[$TIMESTAMP]** USER: $MESSAGE" >> "$SESSION_LOG"
+
+echo "✅ Logged to session file: $SESSION_LOG"
+echo "   (Will appear in next diary entry)"
+

@@ -60,3 +60,5 @@ class UserProvisioningService:
         logger.info(f"[UserProvisioningService.get_or_create_user] User created and profiles initialized: {user.id}")
         return user
 
+
+

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Server, FileText, Users, CheckSquare, Settings } from "lucide-react";
+import { Server, FileText, Users, CheckSquare, Settings, Database } from "lucide-react";
 import AdminChat from "@/components/admin/AdminChat";
 
 export default function AdminPage() {
@@ -77,6 +77,19 @@ export default function AdminPage() {
                             </div>
                             <p className="text-sm text-[var(--text-secondary)]">
                                 Create, edit, and refine prompts for all agents
+                            </p>
+                        </div>
+                    </Link>
+
+                    {/* Database Explorer */}
+                    <Link href="/dashboard/admin/db">
+                        <div className="p-5 bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] hover:border-[var(--primary-blue)] hover:shadow-[var(--shadow-md)] transition-all cursor-pointer">
+                            <div className="flex items-center gap-3 mb-2">
+                                <Database className="w-6 h-6 text-[var(--primary-blue)]" />
+                                <h3 className="text-lg font-semibold text-[var(--text-primary)]">Database Explorer</h3>
+                            </div>
+                            <p className="text-sm text-[var(--text-secondary)]">
+                                Browse tables, execute SELECT queries, and search by session ID
                             </p>
                         </div>
                     </Link>

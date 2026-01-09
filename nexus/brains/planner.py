@@ -17,6 +17,26 @@ class PlannerBrain:
     def __init__(self):
         self.mem = MemoryLogger("nexus.planner")
     
+    def _is_eligibility_step(self, description: str, task_key: str) -> bool:
+        """
+        Detect if a step is eligibility-related.
+        
+        Args:
+            description: Step description
+            task_key: Task key
+            
+        Returns:
+            True if step is eligibility-related
+        """
+        description_lower = description.lower()
+        task_key_lower = task_key.lower() if task_key else ""
+        
+        eligibility_keywords = ['eligibility', 'eligible', 'coverage', 'insurance', '270', 'verify coverage', 'eligibility verification']
+        
+        has_keywords = any(kw in description_lower for kw in eligibility_keywords) or any(kw in task_key_lower for kw in eligibility_keywords)
+        
+        return has_keywords
+    
     async def _get_available_tools(self) -> List[NexusTool]:
         """Get list of available tools from tool library database."""
         from nexus.tools.library.registry import tool_registry
@@ -360,6 +380,33 @@ class PlannerBrain:
                                 "description": step.description,
                                 "tool_hint": step.tool_hint or None
                             }
+                            
+                            # Check if this is Step 2 and is eligibility-related
+                            if step_dict["id"] == "step_1.2" or step_dict["id"].startswith("step_1.2"):
+                                is_eligibility = self._is_eligibility_step(step.description, task_ref.get("task_key", ""))
+                                if is_eligibility:
+                                    logger.debug(f"[PlannerBrain.update_draft_plan] STEP_2_ELIGIBILITY_DETECTED | adding_structured_flow_metadata")
+                                    step_dict["requires_structured_flow"] = True
+                                    step_dict["structured_flow_type"] = "eligibility"
+                                    step_dict["eligibility_steps"] = {
+                                        "step_2_1": {
+                                            "description": "Resolve insurance ID using LLM-guided tool selection",
+                                            "type": "insurance_resolution",
+                                            "pecking_order": ["user_provided", "internal_tools", "multi_step_internal", "external_tools"],
+                                            "requires_llm_tool_selection": True
+                                        },
+                                        "step_2_2": {
+                                            "description": "Query 270 eligibility transaction",
+                                            "type": "eligibility_270_query",
+                                            "requires": ["insurance_id", "insurance_name"]
+                                        },
+                                        "step_2_3": {
+                                            "description": "Handle eligibility scenario and user confirmation",
+                                            "type": "scenario_handling",
+                                            "scenarios": ["internal_found", "external_found", "not_active", "not_found", "error"]
+                                        }
+                                    }
+                            
                             gate_dict["steps"].append(step_dict)
                     else:
                         # If no matching phase (gate not answered or no template), create placeholder

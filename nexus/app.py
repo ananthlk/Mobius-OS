@@ -8,10 +8,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
     datefmt="%H:%M:%S"
 )
-
-# Hide uvicorn access logs (GET/POST requests) to reduce noise
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
 load_dotenv() # Load env vars immediately
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,55 +20,18 @@ from nexus.modules.admin_endpoints import router as admin_router
 from nexus.modules.external_logging import router as external_router
 from nexus.modules.prompt_endpoints import router as prompt_router
 from nexus.modules.gate_endpoints import router as gate_router
-from nexus.modules.task_catalog_endpoints import router as task_catalog_router
-from nexus.modules.user_profile_endpoints import router as user_profile_router
-# Legacy user endpoints - COMMENTED OUT due to route conflict with new module
-# from nexus.modules.user_endpoints import router as user_router
-# New refactored user module (replaces legacy user_endpoints)
-from nexus.modules.users.api import user_router as new_user_router, profile_router as new_profile_router
-from nexus.modules.gmail_endpoints import router as gmail_router
-from nexus.modules.calendar_endpoints import router as calendar_router
-from nexus.modules.google_endpoints import router as google_router
-from nexus.modules.feedback_endpoints import router as feedback_router
+from nexus.modules.user_endpoints import router as user_router
+from nexus.routers.eligibility_v2_router import router as eligibility_v2_router
 from nexus.modules.database import connect_to_db, disconnect_from_db, init_db
 from nexus.recipes.crm_recipes import register_crm_recipes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # #region agent log
-    import json
-    import time
-    import os
-    def _log_debug(session_id, run_id, hypothesis_id, location, message, data):
-        try:
-            # Only log in development (when DEBUG_LOG_PATH is set)
-            log_path = os.getenv("DEBUG_LOG_PATH")
-            if log_path:
-                with open(log_path, "a") as f:
-                    f.write(json.dumps({
-                        "sessionId": session_id,
-                        "runId": run_id,
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000)
-                    }) + "\n")
-        except:
-            pass
-    _log_debug("debug-session", "run1", "D", "app.py:38", "Application startup - lifespan entry", {})
-    # #endregion
     # Startup
     await connect_to_db()
-    # #region agent log
-    _log_debug("debug-session", "run1", "D", "app.py:40", "After connect_to_db, before init_db", {})
-    # #endregion
     # Migration Note: active migrations should be triggered via /api/system/migrate in prod
     # But for dev convenience we can keep init_db or move to migrations entirely.
     await init_db()
-    # #region agent log
-    _log_debug("debug-session", "run1", "D", "app.py:43", "After init_db", {})
-    # #endregion
     await register_crm_recipes() # Now async
     
     # Seed tool library if empty
@@ -129,21 +88,12 @@ app.include_router(spectacles_router, prefix="/api/spectacles", tags=["Spectacle
 app.include_router(portal_router, prefix="/api/portal", tags=["Portal"])
 app.include_router(workflows_router)
 app.include_router(gate_router)  # Gate state management
-app.include_router(task_catalog_router)  # Task catalog management
-app.include_router(user_profile_router)  # User profile management (patient profiles)
-# Legacy user endpoints - COMMENTED OUT due to route conflict with new module
-# app.include_router(user_router)  # User account management (legacy)
-# New refactored user module (replaces legacy user_endpoints)
-app.include_router(new_user_router)  # New user CRUD endpoints
-app.include_router(new_profile_router)  # New user profile endpoints (includes compatibility routes)
-app.include_router(gmail_router)  # Gmail OAuth and email management (legacy - use /api/google for unified)
-app.include_router(calendar_router)  # Calendar OAuth and calendar management (legacy - use /api/google for unified)
-app.include_router(google_router)  # Unified Google OAuth (Gmail + Calendar) - RECOMMENDED
+app.include_router(eligibility_v2_router)  # Eligibility Agent V2
 app.include_router(system_router)
 app.include_router(admin_router)
 app.include_router(external_router)  # External conversation logging
 app.include_router(prompt_router)  # Prompt management
-app.include_router(feedback_router, prefix="/api/feedback", tags=["Feedback"])
+app.include_router(user_router)  # User management
 from nexus.modules.activity import router as activity_router
 app.include_router(activity_router)
 

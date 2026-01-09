@@ -194,3 +194,5 @@ class UserService:
             logger.error(f"[UserService.has_permission] ERROR: {e}", exc_info=True)
             return False
 
+
+

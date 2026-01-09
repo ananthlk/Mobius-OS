@@ -78,6 +78,14 @@ DO NOT commit `.env` files. Instead:
 4. Go to the **Variables & Secrets** tab.
 5. Add variables there (e.g., `DATABASE_URL` pointing to Cloud SQL).
 
+**⚠️ OAuth Setup Required for Portal:**
+The Portal service requires Google OAuth credentials for user authentication. If you see "OAuth client was not found" errors, see **[OAUTH_SETUP_GUIDE.md](../OAUTH_SETUP_GUIDE.md)** for complete setup instructions.
+
+Quick setup:
+```bash
+./scripts/setup_oauth_production.sh
+```
+
 ---
 
 ## 🛠️ 4. Common Tasks

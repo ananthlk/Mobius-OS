@@ -55,3 +55,20 @@ gcloud run deploy mobius-portal \
   --allow-unauthenticated \
   --port 3000
 ```
+
+## 6. Configure OAuth for Portal (Required for User Authentication)
+
+After deploying the Portal, you **must** configure Google OAuth credentials for user sign-in to work.
+
+**Quick Setup:**
+```bash
+./scripts/setup_oauth_production.sh
+```
+
+**Manual Setup:**
+See **[OAUTH_SETUP_GUIDE.md](../../OAUTH_SETUP_GUIDE.md)** for detailed instructions.
+
+The Portal requires these environment variables:
+- `AUTH_GOOGLE_ID` - Google OAuth Client ID
+- `AUTH_GOOGLE_SECRET` - Google OAuth Client Secret
+- `AUTH_URL` - Your production URL

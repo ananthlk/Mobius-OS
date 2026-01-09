@@ -241,6 +241,10 @@ What would you like to do next?"""
                 # Route to bounded plan flow
                 logger.debug(f"[PlanningPhaseBrain.handle_message] ROUTING_TO_BOUNDED_PLAN | session_id={session_id}")
                 try:
+                    # Parse bounded_plan_state if it's a JSON string
+                    if isinstance(bounded_plan_state, str):
+                        bounded_plan_state = json.loads(bounded_plan_state) if bounded_plan_state else {}
+                    
                     # Load session state
                     from nexus.brains.bounded_plan import SessionState
                     session_state = SessionState.from_dict(bounded_plan_state)
@@ -290,6 +294,22 @@ What would you like to do next?"""
                             "system_generated": True
                         }
                     )
+                    
+                    # Emit structured form if present
+                    if controller_output.form_fields:
+                        logger.debug(f"[PlanningPhaseBrain.handle_message] EMITTING_STRUCTURED_FORM | form_fields={len(controller_output.form_fields)}")
+                        await agent.emit("ARTIFACTS", {
+                            "type": "STRUCTURED_FORM",
+                            "form_type": "patient_info",
+                            "message": controller_output.message,
+                            "form_fields": controller_output.form_fields,
+                            "submit_button": controller_output.submit_button,
+                            "context": "bounded_plan_patient_info",
+                            "metadata": {
+                                "session_id": session_id,
+                                "form_id": "patient_info_form"
+                            }
+                        })
                     
                     return {
                         "status": controller_output.plan_readiness.lower().replace("_", " "),
@@ -469,12 +489,65 @@ What would you like to do next?"""
                     
                     logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] BOUNDED_PLAN_STARTED | known_fields={len(session_state.known_fields)}")
                     
-                    # Get initial message from presenter
-                    if session_state.last_bound_plan_spec:
-                        presenter_result = await self.bounded_plan_brain._call_presenter_llm(
-                            bound_plan_spec=session_state.last_bound_plan_spec,
+                    # Check if Step 1 patient info form is needed
+                    needs_form = session_state.known_context.get("needs_patient_info_form", False)
+                    logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] CHECKING_FORM_NEED | needs_form={needs_form}")
+                    
+                    if needs_form:
+                        # Return patient info form request instead of presenter LLM
+                        logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] RETURNING_FORM_REQUEST | step_1_patient_info_needed")
+                        form_request = self.bounded_plan_brain._create_patient_info_form_request(session_state)
+                        
+                        # Emit the form request message
+                        response_text = form_request.message
+                        if form_request.question:
+                            response_text += f"\n\n{form_request.question}"
+                        
+                        await orchestrator._format_emit_and_persist(
+                            agent=agent,
+                            raw_content=response_text,
+                            user_id=user_id,
                             session_id=session_id,
-                            user_id=user_id
+                            context={
+                                "operation": "bounded_plan_start",
+                                "source": "planning_phase_brain",
+                                "system_generated": True
+                            }
+                        )
+                        
+                        # Emit structured form via ARTIFACTS
+                        await agent.emit("ARTIFACTS", {
+                            "type": "STRUCTURED_FORM",
+                            "form_type": "patient_info",
+                            "message": form_request.message,
+                            "form_fields": form_request.form_fields or [],
+                            "submit_button": form_request.submit_button,
+                            "context": "bounded_plan_patient_info",
+                            "metadata": {
+                                "session_id": session_id,
+                                "form_id": "patient_info_form"
+                            }
+                        })
+                        logger.debug(f"[PlanningPhaseBrain.handle_build_reuse_decision] EMITTED_STRUCTURED_FORM | form_fields={len(form_request.form_fields or [])}")
+                        
+                        return {
+                            "status": "success",
+                            "message": form_request.message,
+                            "question": form_request.question,
+                            "next_step": "bounded_plan",
+                            "plan_readiness": form_request.plan_readiness,
+                            "form_fields": form_request.form_fields,
+                            "submit_button": form_request.submit_button
+                        }
+                    
+                    # Get initial message via conversation agent (Step 1 is complete or not patient info)
+                    if session_state.last_bound_plan_spec:
+                        presenter_result = await self.bounded_plan_brain._format_message_via_conversation_agent(
+                            bound_plan_spec=session_state.last_bound_plan_spec,
+                            session_state=session_state,
+                            session_id=session_id,
+                            user_id=user_id,
+                            operation="bounded_plan_initial"
                         )
                         response = presenter_result.get("message", "I'm analyzing your workflow plan. Let me identify what information I need.")
                         question = presenter_result.get("question")
@@ -1071,6 +1144,197 @@ What would you like to do next?"""
         }
         logger.debug(f"[PlanningPhaseBrain.handle_review_plan] EXIT | Returning review context")
         return result
+    
+    async def handle_patient_info_form_submission(
+        self,
+        session_id: int,
+        form_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Handle submission of patient info form.
+        
+        Args:
+            session_id: Session ID
+            form_data: Form field values (e.g., {"patient_name": "John Doe", "dob": "01/15/1980"})
+        
+        Returns:
+            Result dict
+        """
+        logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] ENTRY | session_id={session_id}, fields={list(form_data.keys())}")
+        
+        try:
+            # Load session state
+            session = await self._get_session(session_id)
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+            
+            bounded_plan_state = session.get("bounded_plan_state")
+            if isinstance(bounded_plan_state, str):
+                bounded_plan_state = json.loads(bounded_plan_state) if bounded_plan_state else {}
+            
+            from nexus.brains.bounded_plan import SessionState
+            session_state = SessionState.from_dict(bounded_plan_state)
+            
+            # Update session state with form data
+            for field_name, field_value in form_data.items():
+                if field_value and str(field_value).strip():
+                    session_state.known_fields.add(field_name)
+                    session_state.known_context[field_name] = str(field_value).strip()
+                    logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] FIELD_UPDATED | field={field_name}, value={str(field_value)[:50]}")
+            
+            # Persist updated state
+            await self.bounded_plan_brain._persist_session_state(session_id, session_state)
+            logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] STATE_PERSISTED")
+            
+            # Check if Step 1 is now complete
+            step_1_complete = self.bounded_plan_brain._is_step_1_complete(session_state)
+            logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] STEP_1_CHECK | is_complete={step_1_complete}")
+            
+            if step_1_complete:
+                # Step 1 complete - continue with bounded plan
+                # Get draft plan, task master catalogue, and tool registry
+                draft_plan = session.get("draft_plan")
+                if isinstance(draft_plan, str):
+                    draft_plan = json.loads(draft_plan) if draft_plan else {}
+                
+                from nexus.modules.task_registry import task_registry
+                task_master_catalogue = {}
+                all_tasks = await task_registry.list_tasks({})
+                for task in all_tasks:
+                    task_key = task.get("task_key")
+                    if task_key:
+                        task_master_catalogue[task_key] = task
+                
+                from nexus.brains.planner import PlannerBrain
+                planner_brain = PlannerBrain()
+                tool_registry = await planner_brain._get_available_tools()
+                
+                # Continue with develop_bound_plan
+                develop_output = await self.bounded_plan_brain.develop_bound_plan(
+                    session_state=session_state,
+                    draft_plan=draft_plan,
+                    task_master_catalogue=task_master_catalogue,
+                    tool_registry=tool_registry
+                )
+                
+                # Update session state
+                session_state.last_bound_plan_spec = develop_output.bound_plan_spec
+                session_state.last_next_input_request = develop_output.next_input_request
+                
+                # #region agent log
+                with open("/Users/ananth/Personal AI Projects/Mobius OS/.cursor/debug.log", "a") as f:
+                    import time
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "planning_phase.py:1223", "message": "After form submission - clearing needs_patient_info_form flag", "data": {"needs_patient_info_form_before": session_state.known_context.get("needs_patient_info_form"), "step_1_complete": step_1_complete, "plan_readiness": develop_output.plan_readiness}, "timestamp": int(time.time() * 1000)}) + "\n")
+                # #endregion
+                
+                # Clear needs_patient_info_form flag since Step 1 is complete
+                if "needs_patient_info_form" in session_state.known_context:
+                    del session_state.known_context["needs_patient_info_form"]
+                
+                # #region agent log
+                with open("/Users/ananth/Personal AI Projects/Mobius OS/.cursor/debug.log", "a") as f:
+                    import time
+                    step_1_steps_ready = []
+                    if develop_output.bound_plan_spec:
+                        for step in develop_output.bound_plan_spec.get("steps", []):
+                            step_id = step.get("id") or step.get("step_id", "")
+                            if step_id.startswith("step_1."):
+                                step_1_steps_ready.append({"step_id": step_id, "readiness": step.get("readiness")})
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "planning_phase.py:1235", "message": "After form submission - bound plan step_1 status", "data": {"step_1_steps": step_1_steps_ready, "needs_patient_info_form_after": session_state.known_context.get("needs_patient_info_form")}, "timestamp": int(time.time() * 1000)}) + "\n")
+                # #endregion
+                
+                await self.bounded_plan_brain._persist_session_state(session_id, session_state)
+                
+                # Format message via conversation agent
+                from nexus.brains.conversational_agent import conversational_agent
+                from nexus.core.base_agent import BaseAgent
+                
+                agent = BaseAgent(session_id=session_id)
+                
+                # Emit thinking
+                await agent.emit("THINKING", {
+                    "message": "Patient information collected. Updating workflow plan...",
+                    "operation": "patient_info_form_submission"
+                })
+                
+                # Gather context
+                conversation_history = session.get("transcript", []) if session else []
+                
+                # Build raw message
+                if develop_output.plan_readiness == "READY_FOR_COMPILATION":
+                    raw_message = "Patient information has been collected. Your workflow plan is ready for compilation."
+                else:
+                    # Add null check for bound_plan_spec
+                    if develop_output.bound_plan_spec:
+                        blockers = develop_output.bound_plan_spec.get("blockers", [])
+                        if blockers:
+                            raw_message = f"Patient information collected. {len(blockers)} remaining steps need attention."
+                        else:
+                            raw_message = "Patient information collected. Continuing with workflow plan..."
+                    else:
+                        raw_message = "Patient information collected. Continuing with workflow plan..."
+                
+                # Format via conversation agent
+                formatted_message = await conversational_agent.format_response(
+                    raw_response=raw_message,
+                    user_id=session.get("user_id", "user_123"),
+                    context={
+                        "operation": "patient_info_form_submission",
+                        "source": "bounded_plan",
+                        "session_id": session_id,
+                        "conversation_history": conversation_history,
+                        "bound_plan_context": {
+                            "plan_readiness": develop_output.plan_readiness,
+                            "step_1_complete": True
+                        }
+                    }
+                )
+                
+                presenter_result = {
+                    "message": formatted_message,
+                    # Use develop_output.next_input_request directly, not from bound_plan_spec
+                    "question": develop_output.next_input_request.get("message") if develop_output.next_input_request else None
+                }
+                
+                logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] EXIT | step_1_complete=True, plan_readiness={develop_output.plan_readiness}")
+                
+                return {
+                    "status": "success",
+                    "message": presenter_result.get("message", "Patient information collected. Continuing with workflow..."),
+                    "question": presenter_result.get("question"),
+                    "plan_readiness": develop_output.plan_readiness
+                }
+            else:
+                # Still missing fields - return updated form
+                form_request = self.bounded_plan_brain._create_patient_info_form_request(session_state)
+                
+                # Emit updated form
+                agent = BaseAgent(session_id=session_id)
+                await agent.emit("ARTIFACTS", {
+                    "type": "STRUCTURED_FORM",
+                    "form_type": "patient_info",
+                    "message": form_request.message,
+                    "form_fields": form_request.form_fields or [],
+                    "submit_button": form_request.submit_button,
+                    "context": "bounded_plan_patient_info",
+                    "metadata": {
+                        "session_id": session_id,
+                        "form_id": "patient_info_form"
+                    }
+                })
+                
+                logger.debug(f"[PlanningPhaseBrain.handle_patient_info_form_submission] EXIT | step_1_complete=False, missing_fields")
+                
+                return {
+                    "status": "needs_more_info",
+                    "message": form_request.message,
+                    "form_fields": form_request.form_fields,
+                    "submit_button": form_request.submit_button
+                }
+        
+        except Exception as e:
+            logger.error(f"[PlanningPhaseBrain.handle_patient_info_form_submission] ERROR | error={str(e)}", exc_info=True)
+            raise
     
     async def handle_cancel(self, session_id: int) -> Dict[str, Any]:
         """

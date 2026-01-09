@@ -104,3 +104,5 @@ class GateSelector:
         return gate_def.question.strip()
 
 
+
+
