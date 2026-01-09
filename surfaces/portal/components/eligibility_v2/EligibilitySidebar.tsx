@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useEligibilityAgent } from "@/hooks/useEligibilityAgent";
+import VisitCard from "./VisitCard";
+import VisitDrillDown from "./VisitDrillDown";
 
 interface EligibilitySidebarProps {
     caseId: string;
@@ -12,6 +14,7 @@ interface EligibilitySidebarProps {
 export default function EligibilitySidebar({ caseId, sessionId, caseView: propCaseView }: EligibilitySidebarProps) {
     const { caseView: hookCaseView, getCaseView } = useEligibilityAgent(caseId);
     const [loading, setLoading] = useState(true);
+    const [selectedVisit, setSelectedVisit] = useState<any>(null);
     
     // Use prop caseView if provided, otherwise use hook caseView
     const caseView = propCaseView || hookCaseView;
@@ -77,12 +80,26 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
             {/* Payment Probability */}
             {scoreState && (
                 <div className="mb-6 p-4 bg-[var(--bg-secondary)] rounded-[var(--radius-lg)] border border-[var(--border-subtle)]">
-                    <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
-                        Payment Probability
-                    </h3>
+                    <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                            Payment Probability
+                        </h3>
+                        {caseState.timing?.related_visits && caseState.timing.related_visits.length > 0 && (
+                            <span className="text-[10px] text-[var(--text-secondary)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
+                                Weighted Average
+                            </span>
+                        )}
+                    </div>
                     <div className="text-2xl font-bold mb-1 text-[var(--text-primary)]">
                         {(scoreState.base_probability * 100).toFixed(1)}%
                     </div>
+                    {caseState.timing?.related_visits && caseState.timing.related_visits.length > 0 && (
+                        <div className="text-xs text-[var(--text-secondary)] mb-2">
+                            Based on {caseState.timing.related_visits.filter((v: any) => v.eligibility_probability !== null && v.eligibility_probability !== undefined).length} visit(s)
+                            <br />
+                            <span className="italic">Higher weight on more recent visits</span>
+                        </div>
+                    )}
                     {scoreState.probability_interval && (
                         <div className="text-xs text-[var(--text-secondary)] mb-2">
                             95% Confidence Interval:{" "}
@@ -169,65 +186,22 @@ export default function EligibilitySidebar({ caseId, sessionId, caseView: propCa
                         <p className="text-sm font-semibold text-[var(--text-primary)] mb-2">
                             Appointments & Visits
                         </p>
-                        <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
-                            {caseState.timing.related_visits.map((visit: any, idx: number) => (
-                                <div
-                                    key={idx}
-                                    className="text-xs p-2 rounded-[var(--radius-md)] border bg-[var(--bg-secondary)] border-[var(--border-subtle)]"
-                                >
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-medium">
-                                            {visit.visit_date
-                                                ? new Date(visit.visit_date).toLocaleDateString()
-                                                : "Date TBD"}
-                                        </span>
-                                        {visit.event_tense && (
-                                            <span
-                                                className={`text-xs px-1.5 py-0.5 rounded ${
-                                                    visit.event_tense === "PAST"
-                                                        ? "bg-gray-200 text-gray-700"
-                                                        : "bg-blue-100 text-blue-700"
-                                                }`}
-                                            >
-                                                {visit.event_tense}
-                                            </span>
-                                        )}
-                                    </div>
-                                    {visit.eligibility_status && (
-                                        <div className="mt-1">
-                                            <span
-                                                className={`text-xs font-medium ${
-                                                    visit.eligibility_status === "YES"
-                                                        ? "text-green-600"
-                                                        : visit.eligibility_status === "NO"
-                                                        ? "text-red-600"
-                                                        : "text-gray-600"
-                                                }`}
-                                            >
-                                                {visit.eligibility_status === "YES"
-                                                    ? "✅ Eligible"
-                                                    : visit.eligibility_status === "NO"
-                                                    ? "❌ Not Eligible"
-                                                    : "⏳ Unknown"}
-                                            </span>
-                                            {visit.eligibility_probability !== undefined &&
-                                                visit.eligibility_probability !== null && (
-                                                    <span className="ml-2 text-gray-600">
-                                                        (
-                                                        {Math.round(
-                                                            visit.eligibility_probability * 100
-                                                        )}
-                                                        % probability)
-                                                    </span>
-                                                )}
-                                        </div>
-                                    )}
-                                    {visit.visit_type && (
-                                        <div className="text-gray-500 mt-1">{visit.visit_type}</div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+                        {selectedVisit ? (
+                            <VisitDrillDown
+                                visit={selectedVisit}
+                                onBack={() => setSelectedVisit(null)}
+                            />
+                        ) : (
+                            <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                                {caseState.timing.related_visits.map((visit: any, idx: number) => (
+                                    <VisitCard
+                                        key={visit.visit_id || idx}
+                                        visit={visit}
+                                        onClick={() => setSelectedVisit(visit)}
+                                    />
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 

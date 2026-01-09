@@ -212,6 +212,135 @@ body {
     background: var(--brand-red);
 }
 
+/* --- Status Bar (for eligibility checks) --- */
+.status-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.status-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.status-message {
+    font-weight: var(--font-weight-medium);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-details {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.status-probability {
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary-blue);
+}
+
+.status-visits {
+    color: var(--text-secondary);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: background-color 0.3s;
+    flex-shrink: 0;
+}
+
+.status-bar.status-pending .status-indicator {
+    background: var(--text-muted);
+}
+
+.status-bar.status-in_progress .status-indicator {
+    background: var(--primary-blue);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.status-bar.status-complete .status-indicator {
+    background: var(--brand-green);
+}
+
+.status-bar.status-error .status-indicator {
+    background: var(--brand-red);
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* --- Thinking Container --- */
+.thinking-container {
+    margin: 12px 0;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.thinking-toggle {
+    font-family: var(--font-family);
+}
+
+.thinking-toggle:hover {
+    color: var(--text-primary);
+}
+
+.thinking-content {
+    font-size: 11px;
+}
+
+.thinking-messages {
+    padding-right: 4px;
+}
+
+.thinking-messages::-webkit-scrollbar {
+    width: 4px;
+}
+
+.thinking-messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.thinking-messages::-webkit-scrollbar-thumb {
+    background: var(--border-medium);
+    border-radius: 2px;
+}
+
+.thinking-messages::-webkit-scrollbar-thumb:hover {
+    background: var(--border-strong);
+}
+
+#status-text {
+    flex: 1;
+    font-weight: var(--font-weight-medium);
+}
+
 /* --- Chat Viewport --- */
 .chat-viewport {
     flex: 1;

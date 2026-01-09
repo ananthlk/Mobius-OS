@@ -4,10 +4,14 @@
  */
 
 // State
-let currentContext = 'IDLE'; // IDLE, EMAIL, WEB, PATIENT
+let currentContext = 'IDLE'; // IDLE, EMAIL, WEB, PATIENT, ELIGIBILITY
 let currentEmailData = null; // Stores extracted email data
 let latestSystemMessageId = null; // Track latest system message for feedback
 let feedbackInstances = new Map(); // Track feedback instances by message ID
+let eligibilitySessionId = null; // Current eligibility session ID
+let eligibilityCaseId = null; // Current eligibility case ID
+let eligibilityEventSource = null; // SSE connection for eligibility events
+let currentThinkingContainer = null; // Current thinking container element
 
 // DOM Elements
 const contextIndicator = document.getElementById('context-indicator');
@@ -69,6 +73,18 @@ const CONTEXTS = {
             <input type="text" placeholder="Patient ID" class="input-sm" />
             <button class="control-btn primary">Fetch Record</button>
         `
+    },
+    ELIGIBILITY: {
+        name: 'Eligibility Check',
+        class: 'active',
+        color: '#6C5CE7',
+        components: `
+            <input type="text" id="mrn-input" placeholder="Enter MRN (e.g., MRN056)" class="input-sm" style="margin-bottom: 8px;" />
+            <button class="control-btn primary" id="check-eligibility-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                Check Eligibility
+            </button>
+        `
     }
 };
 
@@ -76,6 +92,24 @@ const CONTEXTS = {
 
 function setContext(mode) {
     if (!CONTEXTS[mode]) return;
+    
+    // Clean up eligibility stream if switching away from ELIGIBILITY context
+    if (currentContext === 'ELIGIBILITY' && mode !== 'ELIGIBILITY') {
+        if (eligibilityEventSource) {
+            eligibilityEventSource.close();
+            eligibilityEventSource = null;
+        }
+        eligibilitySessionId = null;
+        eligibilityCaseId = null;
+        currentThinkingContainer = null;
+        
+        // Hide status bar
+        const statusBar = document.getElementById('status-bar');
+        if (statusBar) {
+            statusBar.style.display = 'none';
+        }
+    }
+    
     currentContext = mode;
     const ctx = CONTEXTS[mode];
 
@@ -111,6 +145,8 @@ function setContext(mode) {
         }
     } else if (mode === 'WEB') {
         attachWebButtonListeners();
+    } else if (mode === 'ELIGIBILITY') {
+        attachEligibilityButtonListeners();
     }
 
     addSystemMessage(`Context switched to: ${ctx.name}`);
@@ -273,6 +309,27 @@ function attachWebButtonListeners() {
     }, 100);
 }
 
+function attachEligibilityButtonListeners() {
+    // Re-attach listeners after DOM update
+    setTimeout(() => {
+        const checkEligibilityBtn = componentsArea.querySelector('#check-eligibility-btn');
+        const mrnInput = componentsArea.querySelector('#mrn-input');
+        
+        if (checkEligibilityBtn) {
+            checkEligibilityBtn.addEventListener('click', handleEligibilityCheck);
+        }
+        
+        if (mrnInput) {
+            // Allow Enter key to trigger check
+            mrnInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleEligibilityCheck();
+                }
+            });
+        }
+    }, 100);
+}
+
 function handleScrapePageResponse(response, loadingId) {
     if (response && response.success && response.pageData) {
         const data = response.pageData;
@@ -399,6 +456,383 @@ function handleScrapeTreeResponse(response, loadingId) {
     }
 }
 
+async function handleEligibilityCheck() {
+    const mrnInput = componentsArea.querySelector('#mrn-input');
+    if (!mrnInput) {
+        addSystemMessage('⚠️ MRN input not found');
+        return;
+    }
+    
+    const mrn = mrnInput.value.trim().toUpperCase();
+    if (!mrn) {
+        addSystemMessage('⚠️ Please enter an MRN (e.g., MRN056)');
+        return;
+    }
+    
+    // Validate MRN format
+    if (!/^MRN\w+$/.test(mrn)) {
+        addSystemMessage('⚠️ Invalid MRN format. Expected format: MRN followed by alphanumeric characters (e.g., MRN056)');
+        return;
+    }
+    
+    const loadingId = addSystemMessage(`🔄 Checking eligibility for ${mrn}...`, true);
+    
+    try {
+        const response = await fetch('http://localhost:8000/api/spectacles/eligibility/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: "spectacles_user", // TODO: Get real user
+                mrn: mrn
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        removeMessage(loadingId);
+        
+        if (data.status === 'success') {
+            eligibilitySessionId = data.session_id;
+            eligibilityCaseId = data.case_id;
+            
+            addSystemMessage(`✅ Eligibility check initiated for ${mrn}\nSession ID: ${eligibilitySessionId}\nCase ID: ${eligibilityCaseId}`);
+            
+            // Start SSE connection
+            connectEligibilityStream(eligibilitySessionId);
+        } else {
+            addSystemMessage(`⚠️ Failed to start eligibility check: ${data.message || 'Unknown error'}`);
+        }
+    } catch (error) {
+        removeMessage(loadingId);
+        console.error('Eligibility check error:', error);
+        if (error.message && error.message.includes('Failed to fetch')) {
+            addSystemMessage('⚠️ Connection to Nexus failed. Is the backend running at http://localhost:8000?');
+        } else {
+            addSystemMessage(`⚠️ Error: ${error.message || 'Unknown error occurred'}`);
+        }
+    }
+}
+
+function connectEligibilityStream(sessionId) {
+    // Close existing connection if any
+    if (eligibilityEventSource) {
+        eligibilityEventSource.close();
+        eligibilityEventSource = null;
+    }
+    
+    const statusBar = document.getElementById('status-bar');
+    const statusText = document.getElementById('status-text');
+    
+    // Show status bar
+    if (statusBar) {
+        statusBar.style.display = 'flex';
+        statusBar.className = 'status-bar status-in_progress';
+        statusText.textContent = 'Connecting to eligibility service...';
+    }
+    
+    const streamUrl = `http://localhost:8000/api/spectacles/eligibility/stream?session_id=${sessionId}`;
+    console.log('[Möbius Spectacles] Connecting to SSE stream:', streamUrl);
+    
+    eligibilityEventSource = new EventSource(streamUrl);
+    
+    eligibilityEventSource.onopen = () => {
+        console.log('[Möbius Spectacles] SSE connection opened');
+        if (statusBar && statusText) {
+            statusBar.style.display = 'flex';
+            statusBar.className = 'status-bar status-in_progress';
+            statusText.textContent = 'Connected. Waiting for updates...';
+        }
+    };
+    
+    eligibilityEventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('[Möbius Spectacles] SSE event received:', data.type);
+            
+            if (data.type === 'connected') {
+                console.log('[Möbius Spectacles] SSE stream connected for session', data.session_id);
+                return;
+            }
+            
+            if (data.type === 'status') {
+                handleStatusEvent(data.payload);
+            } else if (data.type === 'thinking') {
+                handleThinkingEvent(data.payload);
+            } else if (data.type === 'chat') {
+                handleChatEvent(data.payload);
+            } else if (data.type === 'error') {
+                console.error('[Möbius Spectacles] SSE error:', data.message);
+                addSystemMessage(`⚠️ Stream error: ${data.message}`);
+                if (statusBar && statusText) {
+                    statusBar.className = 'status-bar status-error';
+                    statusText.textContent = `Error: ${data.message}`;
+                }
+            }
+        } catch (error) {
+            console.error('[Möbius Spectacles] Error parsing SSE event:', error, event.data);
+        }
+    };
+    
+    eligibilityEventSource.onerror = (error) => {
+        console.error('[Möbius Spectacles] SSE connection error:', error);
+        if (eligibilityEventSource.readyState === EventSource.CLOSED) {
+            console.log('[Möbius Spectacles] SSE connection closed, attempting reconnect...');
+            // Reconnect after 2 seconds
+            setTimeout(() => {
+                if (eligibilitySessionId) {
+                    connectEligibilityStream(eligibilitySessionId);
+                }
+            }, 2000);
+        }
+    };
+}
+
+function handleStatusEvent(payload) {
+    const statusBar = document.getElementById('status-bar');
+    const statusText = document.getElementById('status-text');
+    const statusDetails = document.getElementById('status-details');
+    const statusProbability = document.getElementById('status-probability');
+    const statusVisits = document.getElementById('status-visits');
+    
+    if (!statusBar || !statusText) {
+        console.warn('[Möbius Spectacles] Status bar elements not found');
+        return;
+    }
+    
+    const phase = payload.phase || 'unknown';
+    const status = payload.status || 'unknown';
+    const message = payload.message || 'Processing...';
+    const data = payload.data || {};
+    
+    // Update status bar classes and message
+    statusBar.className = `status-bar status-${status}`;
+    statusText.textContent = `${phase.charAt(0).toUpperCase() + phase.slice(1)}: ${message}`;
+    
+    // Show rich details if available (e.g., scoring complete with probability data)
+    if (data.overall_probability !== undefined && status === 'complete' && phase === 'scoring') {
+        // Format probability as percentage
+        const probabilityPercent = (data.overall_probability * 100).toFixed(1);
+        if (statusProbability) {
+            statusProbability.textContent = `Overall Likelihood to Pay: ${probabilityPercent}%`;
+        }
+        
+        // Format visit dates
+        if (data.visits && data.visits.length > 0) {
+            const visitDates = data.visits
+                .filter(v => v.visit_date)
+                .map(v => {
+                    const date = new Date(v.visit_date);
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                })
+                .join(', ');
+            
+            if (visitDates && statusVisits) {
+                statusVisits.textContent = `Visit Dates: ${visitDates}`;
+            }
+        }
+        
+        // Show details section
+        if (statusDetails) {
+            statusDetails.style.display = 'flex';
+        }
+    } else {
+        // Hide details for other phases
+        if (statusDetails) {
+            statusDetails.style.display = 'none';
+        }
+    }
+    
+    console.log('[Möbius Spectacles] Status update:', { phase, status, message, data });
+    
+    // Show status bar if hidden
+    if (statusBar.style.display === 'none' || statusBar.style.display === '') {
+        statusBar.style.display = 'flex';
+    }
+    
+    // If status is complete or error, stop streaming animation on thinking container
+    if (status === 'complete' || status === 'error') {
+        if (currentThinkingContainer) {
+            const label = currentThinkingContainer._label;
+            if (label) {
+                label.textContent = 'Thinking';
+            }
+        }
+    }
+}
+
+function handleThinkingEvent(payload) {
+    // Get or create thinking container
+    if (!currentThinkingContainer) {
+        currentThinkingContainer = createThinkingContainer();
+        chatContainer.appendChild(currentThinkingContainer);
+        scrollToBottom();
+    }
+    
+    // Extract thinking message - THINKING events have payload.message
+    const message = payload.message || payload.content || '';
+    if (!message) return;
+    
+    // Update thinking container with streaming state
+    updateThinkingContainer(currentThinkingContainer, message, true);
+}
+
+function handleChatEvent(payload) {
+    // Handle OUTPUT events - these contain chat messages/questions
+    // OUTPUT events from eligibility v2 have structure: {role: 'assistant', content: '...'}
+    // But eligibility v2 also sends presentation_summary and next_questions in turn responses
+    // which get stored in OUTPUT bucket
+    
+    const content = payload.content || payload.presentation_summary || '';
+    const nextQuestions = payload.next_questions || [];
+    
+    // Stop thinking animation when chat message arrives
+    if (currentThinkingContainer) {
+        const label = currentThinkingContainer._label;
+        if (label) {
+            label.textContent = 'Thinking';
+        }
+    }
+    
+    if (content) {
+        addSystemMessage(content);
+    }
+    
+    if (nextQuestions && nextQuestions.length > 0) {
+        // Display questions
+        const questionsHtml = nextQuestions.map((q, idx) => {
+            const questionText = typeof q === 'string' ? q : (q.text || q.question || '');
+            return `<div style="margin: 8px 0; padding: 8px; background: var(--bg-secondary); border-radius: 6px; border-left: 3px solid var(--primary-blue);">
+                <strong>Question ${idx + 1}:</strong> ${escapeHtml(questionText)}
+            </div>`;
+        }).join('');
+        
+        const questionsDiv = document.createElement('div');
+        questionsDiv.innerHTML = `
+            <div style="margin-top: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Questions:</div>
+            ${questionsHtml}
+        `;
+        chatContainer.appendChild(questionsDiv);
+        scrollToBottom();
+    }
+}
+
+function createThinkingContainer() {
+    const container = document.createElement('div');
+    container.className = 'thinking-container';
+    container.id = 'thinking-' + Date.now();
+    
+    let isExpanded = true; // Start expanded when streaming
+    let thinkingMessages = [];
+    
+    const toggleButton = document.createElement('button');
+    toggleButton.className = 'thinking-toggle';
+    toggleButton.style.cssText = 'width: 100%; text-align: left; display: flex; align-items: center; justify-content: space-between; padding: 8px 0; background: none; border: none; cursor: pointer; color: var(--text-secondary);';
+    
+    const leftSection = document.createElement('div');
+    leftSection.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+    
+    const indicator = document.createElement('div');
+    indicator.className = 'thinking-indicator';
+    indicator.style.cssText = 'width: 0.5px; height: 16px; background: var(--primary-blue); flex-shrink: 0;';
+    
+    const label = document.createElement('span');
+    label.className = 'thinking-label';
+    label.style.cssText = 'font-size: 11px; font-weight: 500; color: var(--primary-blue);';
+    label.textContent = 'Thinking';
+    
+    const count = document.createElement('span');
+    count.className = 'thinking-count';
+    count.style.cssText = 'font-size: 11px; color: var(--text-muted);';
+    count.textContent = '(0)';
+    
+    const chevron = document.createElement('span');
+    chevron.className = 'thinking-chevron';
+    chevron.innerHTML = '▼';
+    chevron.style.cssText = 'font-size: 10px; color: var(--text-muted); transition: transform 0.2s;';
+    
+    leftSection.appendChild(indicator);
+    leftSection.appendChild(label);
+    leftSection.appendChild(count);
+    toggleButton.appendChild(leftSection);
+    toggleButton.appendChild(chevron);
+    
+    const contentArea = document.createElement('div');
+    contentArea.className = 'thinking-content';
+    contentArea.style.cssText = 'margin-left: 10px; margin-top: 4px; max-height: 300px; overflow-y: auto; display: block;';
+    
+    const messagesContainer = document.createElement('div');
+    messagesContainer.className = 'thinking-messages';
+    messagesContainer.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    contentArea.appendChild(messagesContainer);
+    
+    toggleButton.addEventListener('click', () => {
+        isExpanded = !isExpanded;
+        if (isExpanded) {
+            contentArea.style.display = 'block';
+            chevron.style.transform = 'rotate(0deg)';
+        } else {
+            contentArea.style.display = 'none';
+            chevron.style.transform = 'rotate(-90deg)';
+        }
+    });
+    
+    container.appendChild(toggleButton);
+    container.appendChild(contentArea);
+    
+    // Store messages array in container for updates
+    container._thinkingMessages = thinkingMessages;
+    container._messagesContainer = messagesContainer;
+    container._count = count;
+    container._label = label;
+    
+    return container;
+}
+
+function updateThinkingContainer(container, message, isStreaming) {
+    if (!container || !container._thinkingMessages) return;
+    
+    const messages = container._thinkingMessages;
+    const messagesContainer = container._messagesContainer;
+    const count = container._count;
+    const label = container._label;
+    
+    // Add new message if provided
+    if (message && !messages.includes(message)) {
+        messages.push(message);
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.style.cssText = 'font-size: 11px; color: var(--text-secondary); line-height: 1.5; padding-left: 8px; border-left: 2px solid var(--primary-blue-light);';
+        messageDiv.textContent = message;
+        messagesContainer.appendChild(messageDiv);
+    }
+    
+    // Update count
+    if (count) {
+        count.textContent = `(${messages.length})`;
+    }
+    
+    // Update label for streaming state
+    if (label) {
+        if (isStreaming) {
+            label.innerHTML = '<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="width: 4px; height: 4px; background: var(--primary-blue); border-radius: 50%; animation: pulse 1.5s ease-in-out infinite;"></span>Thinking</span>';
+        } else {
+            label.textContent = 'Thinking';
+        }
+    }
+    
+    // Scroll to bottom
+    const contentArea = container.querySelector('.thinking-content');
+    if (contentArea) {
+        contentArea.scrollTop = contentArea.scrollHeight;
+    }
+    
+    scrollToBottom();
+}
+
 async function handleScrapeTree() {
     console.log('[Möbius Spectacles Side Panel] Scrape DOM tree requested');
     const loadingId = addSystemMessage('🔄 Scraping DOM tree structure...', true);
@@ -515,14 +949,50 @@ function scrollToBottom() {
 
 sendBtn.addEventListener('click', async () => {
     const text = input.value.trim();
-    if (text) {
-        addUserMessage(text);
-        input.value = '';
+    if (!text) return;
+    
+    addUserMessage(text);
+    input.value = '';
 
-        // Show loading indicator
-        const loadingId = addSystemMessage('<div class="spinner-dots">Thinking...</div>', true);
+    // Show loading indicator
+    const loadingId = addSystemMessage('<div class="spinner-dots">Thinking...</div>', true);
 
-        try {
+    try {
+        // Route to eligibility endpoint if in ELIGIBILITY context with active session
+        if (currentContext === 'ELIGIBILITY' && eligibilitySessionId && eligibilityCaseId) {
+            // Send to eligibility v2 turn endpoint
+            const uiEvent = {
+                event_type: "user_message",
+                data: { message: text },
+                timestamp: new Date().toISOString()
+            };
+            
+            const response = await fetch(`http://localhost:8000/api/eligibility-v2/cases/${eligibilityCaseId}/turn`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Session-ID': String(eligibilitySessionId),
+                    'X-User-ID': 'spectacles_user',
+                    'X-Patient-ID': eligibilityCaseId.replace('spectacles_', '').split('_')[0] || ''
+                },
+                body: JSON.stringify(uiEvent)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            // Remove loading indicator
+            removeMessage(loadingId);
+            
+            // The SSE stream will handle the response (thinking messages, status updates, chat messages)
+            // We don't need to display anything here as the stream will update the UI
+            console.log('[Möbius Spectacles] Message sent to eligibility v2, awaiting stream updates...');
+            
+        } else {
+            // Default: send to generic chat endpoint
             const response = await fetch('http://localhost:8000/api/spectacles/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -540,12 +1010,12 @@ sendBtn.addEventListener('click', async () => {
             // Extract memory_event_id if available (from FEEDBACK_UI artifact or response)
             const memoryEventId = data.memory_event_id || null;
             addSystemMessage(data.content, false, memoryEventId);
-
-        } catch (error) {
-            removeMessage(loadingId);
-            addSystemMessage("⚠️ Connection to Nexus failed. Is the backend running?");
-            console.error(error);
         }
+
+    } catch (error) {
+        removeMessage(loadingId);
+        addSystemMessage("⚠️ Connection to Nexus failed. Is the backend running?");
+        console.error('[Möbius Spectacles] Error sending message:', error);
     }
 });
 

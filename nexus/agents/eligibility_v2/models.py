@@ -128,6 +128,7 @@ class VisitInfo(BaseModel):
     eligibility_status: Optional[EligibilityStatus] = None
     eligibility_probability: Optional[float] = None  # 0.0-1.0
     event_tense: Optional[EventTense] = None
+    score_state: Optional["ScoreState"] = None  # Full scoring details for drill-down view
 
 
 class TimingInfo(BaseModel):
@@ -233,12 +234,6 @@ class ScoreState(BaseModel):
     base_probability_source: Optional[Literal["direct_evidence", "historical_fallback"]] = None
     calculation_explanation: Optional[Dict[str, Any]] = None  # Structured calculation explanation
     calculation_human_readable: Optional[str] = None  # Human-readable explanation
-    # New fields for purist probability model
-    state_probabilities: Optional[Dict[str, float]] = None  # Probabilities for all 4 states
-    risk_probabilities: Optional[Dict[str, float]] = None  # Individual risk probabilities
-    base_probability_source: Optional[Literal["direct_evidence", "historical_fallback"]] = None
-    calculation_explanation: Optional[Dict[str, Any]] = None  # Structured calculation explanation
-    calculation_human_readable: Optional[str] = None  # Human-readable explanation
 
 
 # ============================================================================
@@ -274,9 +269,25 @@ class CompletionStatusModel(BaseModel):
 # LLM Response Models
 # ============================================================================
 
+class CaseStateUpdateSuggestion(BaseModel):
+    """LLM-suggested updates to CaseState - to be applied deterministically"""
+    # Patient fields
+    patient_updates: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    
+    # Health plan fields
+    health_plan_updates: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    
+    # Timing fields
+    timing_updates: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    
+    # Other fields that can be safely updated from user input
+    other_updates: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
 class LLMInterpretResponse(BaseModel):
-    updated_case_state: CaseState
+    suggested_updates: CaseStateUpdateSuggestion
     completion: CompletionStatusModel
+    reasoning: Optional[str] = None  # LLM's reasoning for the updates
 
 
 class LLMPlanResponse(BaseModel):

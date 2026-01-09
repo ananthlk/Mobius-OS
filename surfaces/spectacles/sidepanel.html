@@ -72,7 +72,19 @@
       </div>
     </header>
 
-    <!-- 2. Main Chat Interface -->
+    <!-- 2. Status Bar (for eligibility checks) -->
+    <div id="status-bar" class="status-bar" style="display: none;">
+      <div class="status-indicator"></div>
+      <div class="status-content">
+        <span id="status-text" class="status-message">Ready</span>
+        <div id="status-details" class="status-details" style="display: none;">
+          <span id="status-probability" class="status-probability"></span>
+          <span id="status-visits" class="status-visits"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Main Chat Interface -->
     <main class="chat-viewport" id="chat-container">
       <div class="message system-message">
         <div class="avatar">

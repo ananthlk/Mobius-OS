@@ -114,6 +114,14 @@ async def submit_user_message(
     
     # Format presentation_summary through conversational agent
     raw_summary = result.get("presentation_summary", "")
+    if not raw_summary or not raw_summary.strip():
+        # If no summary was generated, create a fallback response
+        logger.warning(f"No presentation_summary generated for case {case_id}, creating fallback")
+        score_state = result.get("score_state", {})
+        base_probability = score_state.get("base_probability", 0) if isinstance(score_state, dict) else getattr(score_state, "base_probability", 0)
+        raw_summary = f"Thank you for providing that information. Based on the eligibility check, the payment probability is {base_probability:.1%}. I'm processing your eligibility assessment."
+        result["presentation_summary"] = raw_summary
+    
     if raw_summary:
         await _emit_process_event(session_id, "conversation", "in_progress", "Conversation engine initiated - formatting response...")
         
@@ -181,6 +189,9 @@ async def submit_user_message(
         except Exception as e:
             logger.warning(f"Failed to format presentation_summary through conversational agent: {e}", exc_info=True)
             await _emit_process_event(session_id, "conversation", "error", f"Conversation formatting error: {str(e)}")
+            # Ensure we still have a response even if formatting fails
+            if not result.get("presentation_summary"):
+                result["presentation_summary"] = raw_summary
     
     # Format next_questions through conversational agent
     next_questions = result.get("next_questions", [])
@@ -216,6 +227,33 @@ async def submit_user_message(
             logger.debug(f"Formatted {len(formatted_questions)} questions through conversational agent")
         except Exception as e:
             logger.warning(f"Failed to format next_questions: {e}")
+    
+    # Store formatted response in OUTPUT bucket for SSE streaming
+    if session_id:
+        try:
+            from nexus.modules.database import database
+            import json
+            from datetime import datetime, timezone
+            output_payload = {
+                "role": "assistant",
+                "content": result.get("presentation_summary", ""),
+                "presentation_summary": result.get("presentation_summary", ""),
+                "next_questions": result.get("next_questions", []),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            await database.execute(
+                query="""
+                INSERT INTO memory_events (session_id, bucket_type, payload)
+                VALUES (:sid, 'OUTPUT', :payload)
+                """,
+                values={
+                    "sid": session_id,
+                    "payload": json.dumps(output_payload)
+                }
+            )
+            logger.debug(f"Stored assistant response in OUTPUT bucket for session {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to store assistant response: {e}")
     
     return result
 

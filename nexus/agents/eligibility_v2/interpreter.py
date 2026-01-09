@@ -7,10 +7,11 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any
-from datetime import date
+from datetime import date, datetime
 
 from nexus.agents.eligibility_v2.models import (
-    CaseState, UIEvent, LLMInterpretResponse, EventTense, CompletionStatus, CompletionStatusModel
+    CaseState, UIEvent, LLMInterpretResponse, EventTense, CompletionStatus, CompletionStatusModel,
+    CaseStateUpdateSuggestion
 )
 from nexus.agents.eligibility_v2.exceptions import LLMResponseValidationError
 from nexus.services.eligibility_v2.llm_call_repository import LLMCallRepository
@@ -80,11 +81,6 @@ class EligibilityInterpreter:
             # Validate response
             interpret_response = self._validate_response(response_data)
             
-            # Deterministically set event_tense if DOS provided
-            interpret_response.updated_case_state = self._determine_event_tense(
-                interpret_response.updated_case_state
-            )
-            
             # Log LLM call
             await self.llm_call_repo.log_call(
                 case_pk=case_pk,
@@ -110,19 +106,30 @@ User Input:
 Event Type: {ui_event.event_type}
 Data: {json.dumps(ui_event.data, indent=2)}
 
+CRITICAL: You are an INTERPRETER, not an updater. Your job is to EXTRACT information from user input and SUGGEST what should be updated. You do NOT directly update the CaseState.
+
+CRITICAL: Preserve Eligibility Check Results:
+- If eligibility_check.checked is True, you MUST NOT suggest changes to eligibility_truth fields
+- These fields were set by a 270 transaction and should be preserved
+
+CRITICAL: Extract and suggest updates for:
+1. Patient demographics (first_name, last_name, date_of_birth, member_id, sex)
+2. Health plan info (payer_name, payer_id, plan_name, product_type, contract_status)
+3. Timing (dos_date)
+
 CRITICAL: Extract product_type and contract_status from natural language:
-- "MEDICAID" or "Medicaid" → health_plan.product_type = "MEDICAID"
-- "MEDICARE" or "Medicare" → health_plan.product_type = "MEDICARE"
-- "COMMERCIAL" or "Commercial" → health_plan.product_type = "COMMERCIAL"
-- "CONTRACTED" or "contracted" or "we are contracted" → health_plan.contract_status = "CONTRACTED"
-- "NON_CONTRACTED" or "non-contracted" → health_plan.contract_status = "NON_CONTRACTED"
-- "the contract is still active" → health_plan.contract_status = "CONTRACTED"
+- "MEDICAID" or "Medicaid" → health_plan_updates.product_type = "MEDICAID"
+- "MEDICARE" or "Medicare" → health_plan_updates.product_type = "MEDICARE"
+- "COMMERCIAL" or "Commercial" → health_plan_updates.product_type = "COMMERCIAL"
+- "CONTRACTED" or "contracted" or "we are contracted" → health_plan_updates.contract_status = "CONTRACTED"
+- "NON_CONTRACTED" or "non-contracted" → health_plan_updates.contract_status = "NON_CONTRACTED"
+- "the contract is still active" → health_plan_updates.contract_status = "CONTRACTED"
 
 CRITICAL: Date Extraction and Inference:
 1. Extract dos_date from user input if explicitly mentioned:
-   - "September 20, 2024" or "Sep 20, 2024" → timing.dos_date = "2024-09-20"
-   - "9/20/2024" → timing.dos_date = "2024-09-20"
-   - "it is 2026-02-01" → timing.dos_date = "2026-02-01"
+   - "September 20, 2024" or "Sep 20, 2024" → timing_updates.dos_date = "2024-09-20"
+   - "9/20/2024" → timing_updates.dos_date = "2024-09-20"
+   - "it is 2026-02-01" → timing_updates.dos_date = "2026-02-01"
    - Always convert dates to ISO format (YYYY-MM-DD)
 
 2. If dos_date is NOT in user input but timing.dos_date is null/missing:
@@ -131,21 +138,21 @@ CRITICAL: Date Extraction and Inference:
      * If all visits are past → use the most recent visit_date
      * Priority: scheduled > completed > cancelled
    - This is CRITICAL: dos_date should NEVER remain null if visits are available
-
-3. After setting dos_date (extracted or inferred), set timing.event_tense:
-   * If dos_date is in the past (before today) → event_tense = "PAST"
-   * If dos_date is in the future (after today) → event_tense = "FUTURE"
-   * If dos_date is today → event_tense = "PAST"
-
-Please update the CaseState with information from the user input, and infer missing fields from available data.
+   - Suggest in timing_updates.dos_date
 
 Return JSON with this structure:
 {{
-  "updated_case_state": {{ /* Full CaseState object */ }},
+  "suggested_updates": {{
+    "patient_updates": {{"first_name": "...", "date_of_birth": "YYYY-MM-DD", ...}},
+    "health_plan_updates": {{"product_type": "COMMERCIAL", "contract_status": "CONTRACTED", ...}},
+    "timing_updates": {{"dos_date": "YYYY-MM-DD"}},
+    "other_updates": {{}}
+  }},
   "completion": {{
     "status": "COMPLETE" | "INCOMPLETE" | "NEEDS_INPUT",
     "missing_fields": ["field1", "field2"]
-  }}
+  }},
+  "reasoning": "Brief explanation of what you extracted and why"
 }}
 """
         return prompt
@@ -181,39 +188,48 @@ Return JSON with this structure:
             response_data = self._normalize_response_data(response_data)
             
             # Check if response has the expected top-level structure
-            if "updated_case_state" not in response_data or "completion" not in response_data:
-                logger.warning(f"LLM returned partial response. Got keys: {list(response_data.keys())}")
-                
-                # Try to construct full response from partial data
-                # If response_data looks like it might be a nested object, try to extract it
-                if "health_plan" in response_data or "patient" in response_data or "timing" in response_data:
-                    # This looks like a CaseState object, wrap it
-                    logger.info("Attempting to wrap partial response as CaseState")
-                    try:
-                        case_state = CaseState(**response_data)
-                        # Create default completion status
-                        completion = CompletionStatusModel(
-                            status=CompletionStatus.INCOMPLETE,
-                            missing_fields=[]
-                        )
-                        response_data = {
-                            "updated_case_state": case_state.model_dump(),
-                            "completion": completion.model_dump()
+            if "suggested_updates" not in response_data or "completion" not in response_data:
+                # Backward compatibility: check for old format
+                if "updated_case_state" in response_data:
+                    logger.warning("LLM returned old format (updated_case_state), converting to suggested_updates")
+                    # Convert old format to new format
+                    case_state = CaseState(**response_data["updated_case_state"])
+                    
+                    # Extract updates from case_state
+                    suggested_updates = CaseStateUpdateSuggestion(
+                        patient_updates={
+                            k: v for k, v in case_state.patient.model_dump().items() 
+                            if v is not None
+                        },
+                        health_plan_updates={
+                            k: v.value if hasattr(v, 'value') else v 
+                            for k, v in case_state.health_plan.model_dump().items() 
+                            if v is not None and (not hasattr(v, 'value') or v.value != "UNKNOWN")
+                        },
+                        timing_updates={
+                            k: v.isoformat() if isinstance(v, date) else (v.value if hasattr(v, 'value') else v)
+                            for k, v in case_state.timing.model_dump().items() 
+                            if v is not None and k != "related_visits"
                         }
-                    except Exception as e:
-                        logger.error(f"Failed to construct CaseState from partial response: {e}")
-                        raise LLMResponseValidationError(
-                            f"LLM returned partial response that couldn't be parsed. "
-                            f"Expected 'updated_case_state' and 'completion' fields. "
-                            f"Got: {list(response_data.keys())}"
-                        )
-                else:
-                    # Unknown structure
-                    raise LLMResponseValidationError(
-                        f"LLM returned unexpected response structure. "
-                        f"Expected 'updated_case_state' and 'completion' fields. "
-                        f"Got: {list(response_data.keys())}"
                     )
+                    response_data = {
+                        "suggested_updates": suggested_updates.model_dump(),
+                        "completion": response_data["completion"],
+                        "reasoning": "Converted from old format"
+                    }
+                else:
+                    logger.warning(f"LLM returned partial response. Got keys: {list(response_data.keys())}")
+                    # Try to construct response from partial data
+                    suggested_updates = CaseStateUpdateSuggestion()
+                    completion = CompletionStatusModel(
+                        status=CompletionStatus.INCOMPLETE,
+                        missing_fields=[]
+                    )
+                    response_data = {
+                        "suggested_updates": suggested_updates.model_dump(),
+                        "completion": completion.model_dump(),
+                        "reasoning": "Constructed from partial response"
+                    }
             
             return LLMInterpretResponse(**response_data)
         except LLMResponseValidationError:
@@ -222,12 +238,3 @@ Return JSON with this structure:
             logger.error(f"Invalid LLM response: {e}")
             raise LLMResponseValidationError(f"Invalid response structure: {e}")
     
-    def _determine_event_tense(self, case_state: CaseState) -> CaseState:
-        """Deterministically set event_tense based on dos_date"""
-        if case_state.timing.dos_date:
-            today = date.today()
-            if case_state.timing.dos_date <= today:
-                case_state.timing.event_tense = EventTense.PAST
-            else:
-                case_state.timing.event_tense = EventTense.FUTURE
-        return case_state

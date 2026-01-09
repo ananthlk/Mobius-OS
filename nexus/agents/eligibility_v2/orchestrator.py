@@ -13,7 +13,8 @@ from copy import deepcopy
 
 from nexus.agents.eligibility_v2.models import (
     CaseState, UIEvent, LLMPlanResponse, ScoreState, CompletionStatus,
-    EligibilityStatus, EventTense, ProductType, VisitInfo, EligibilityCheckSource
+    EligibilityStatus, EventTense, ProductType, VisitInfo, EligibilityCheckSource,
+    EvidenceStrength, ContractStatus, Sex
 )
 from nexus.agents.eligibility_v2.interpreter import EligibilityInterpreter
 from nexus.agents.eligibility_v2.scorer import EligibilityScorer
@@ -80,7 +81,14 @@ class EligibilityOrchestrator:
             ui_event=ui_event,
             case_pk=case_pk
         )
-        case_state = interpret_response.updated_case_state
+        
+        # Apply interpreter suggestions deterministically
+        case_state = self._deterministically_update_case_state(
+            case_state=case_state,
+            update_source="interpreter",
+            updates=interpret_response.suggested_updates.model_dump()
+        )
+        
         completion_status = interpret_response.completion
         
         # Check for missing fields after interpretation
@@ -92,7 +100,14 @@ class EligibilityOrchestrator:
         
         # 5. Perform eligibility check if insurance info is available
         if case_state.health_plan.payer_name and case_state.patient.member_id:
-            case_state = await self._check_and_perform_eligibility_check(case_state, session_id)
+            eligibility_result = await self._check_and_perform_eligibility_check(case_state, session_id)
+            # Apply eligibility check updates deterministically
+            case_state = self._deterministically_update_case_state(
+                case_state=case_state,
+                update_source="eligibility_check",
+                updates={},  # Updates come from eligibility_result
+                eligibility_check_result=eligibility_result
+            )
         
         # 6. Score
         await self._emit_process_event(session_id, "scoring", "in_progress", "Scoring engine initiated - calculating eligibility probability...")
@@ -107,7 +122,48 @@ class EligibilityOrchestrator:
             )
         
         score_state = await self.scorer.score(case_state, emit_calculation=emit_calculation)
-        await self._emit_process_event(session_id, "scoring", "complete", "Scoring complete")
+        
+        # 6.5. If we have visits with probabilities, compute weighted average for case-level probability
+        if case_state.timing.related_visits and len(case_state.timing.related_visits) > 0:
+            weighted_avg = self._compute_weighted_average_probability(case_state.timing.related_visits)
+            if weighted_avg is not None:
+                # Update base_probability with weighted average
+                score_state.base_probability = weighted_avg
+                # Also update state_probabilities if available
+                if score_state.state_probabilities:
+                    # For now, update eligible probability (main one)
+                    # In future, could compute weighted averages for all states
+                    score_state.state_probabilities["eligible"] = weighted_avg
+                logger.info(
+                    f"Updated case-level probability to weighted average: {weighted_avg:.2%} "
+                    f"from {len(case_state.timing.related_visits)} visits"
+                )
+        
+        # Prepare scoring summary data for status bar
+        scoring_data = {
+            "overall_probability": score_state.base_probability,
+            "confidence": score_state.base_confidence,
+            "visits": []
+        }
+        
+        # Extract visit dates and probabilities
+        if case_state.timing.related_visits:
+            for visit in case_state.timing.related_visits:
+                visit_data = {
+                    "visit_date": visit.visit_date.isoformat() if visit.visit_date else None,
+                    "probability": visit.eligibility_probability,
+                    "status": visit.eligibility_status.value if visit.eligibility_status else None,
+                    "visit_type": visit.visit_type
+                }
+                scoring_data["visits"].append(visit_data)
+        
+        await self._emit_process_event(
+            session_id, 
+            "scoring", 
+            "complete", 
+            f"Scoring complete - Overall Likelihood: {score_state.base_probability:.1%}",
+            data=scoring_data
+        )
         
         # 7. Plan
         await self._emit_process_event(session_id, "planning", "in_progress", "Planning phase initiated - generating questions and improvement plan...")
@@ -166,7 +222,19 @@ class EligibilityOrchestrator:
                 case_state.patient.first_name = demographics.get("first_name")
                 case_state.patient.last_name = demographics.get("last_name")
                 case_state.patient.date_of_birth = demographics.get("date_of_birth")
-                case_state.patient.sex = demographics.get("sex")
+                # Handle sex field - convert string to enum if needed
+                sex_value = demographics.get("sex")
+                if sex_value:
+                    if isinstance(sex_value, str):
+                        try:
+                            from nexus.agents.eligibility_v2.models import Sex
+                            case_state.patient.sex = Sex(sex_value)
+                        except ValueError:
+                            case_state.patient.sex = None
+                    else:
+                        case_state.patient.sex = sex_value
+                else:
+                    case_state.patient.sex = None
                 logger.info(f"Loaded demographics for patient {patient_id}")
                 
                 # Emit thinking message with demographics metadata
@@ -216,7 +284,14 @@ class EligibilityOrchestrator:
         
         # Perform eligibility check if we have insurance info
         if case_state.health_plan.payer_name and case_state.patient.member_id:
-            case_state = await self._check_and_perform_eligibility_check(case_state, session_id)
+            eligibility_result = await self._check_and_perform_eligibility_check(case_state, session_id)
+            # Apply eligibility check updates deterministically
+            case_state = self._deterministically_update_case_state(
+                case_state=case_state,
+                update_source="eligibility_check",
+                updates={},  # Updates come from eligibility_result
+                eligibility_check_result=eligibility_result
+            )
         
         # Load visits/appointments (±6 months = 180 days)
         visits_tool = EMRPatientVisitsRetriever()
@@ -429,6 +504,8 @@ class EligibilityOrchestrator:
             # For visit scoring, don't emit calculation steps (too verbose)
             score_state = await scorer.score(temp_case_state, emit_calculation=None)
             visit_info.eligibility_probability = score_state.base_probability
+            # Store full score_state for drill-down view
+            visit_info.score_state = score_state
             logger.debug(
                 f"Computed probability for visit {visit_info.visit_id} ({visit_date}): "
                 f"{visit_info.eligibility_probability:.2%}, status={visit_info.eligibility_status}"
@@ -436,17 +513,78 @@ class EligibilityOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to compute probability for visit {visit_info.visit_id}: {e}")
             visit_info.eligibility_probability = None
+            visit_info.score_state = None
         
         return visit_info
+    
+    def _compute_weighted_average_probability(self, visits: list[VisitInfo], tau: int = 90) -> Optional[float]:
+        """
+        Compute weighted average of visit probabilities using recency boost.
+        
+        Formula: w_i = exp(-|days_from_today| / τ)
+        Where τ (tau) is the time constant (default 90 days).
+        Closer visits get higher weight.
+        
+        Args:
+            visits: List of VisitInfo objects with eligibility_probability
+            tau: Time constant for exponential decay (default 90 days)
+        
+        Returns:
+            Weighted average probability (0.0-1.0) or None if no valid visits
+        """
+        from math import exp
+        
+        today = date.today()
+        
+        # Filter visits with valid probabilities
+        valid_visits = [
+            v for v in visits 
+            if v.eligibility_probability is not None 
+            and v.visit_date is not None
+        ]
+        
+        if not valid_visits:
+            return None
+        
+        if len(valid_visits) == 1:
+            # Single visit: return its probability directly
+            return valid_visits[0].eligibility_probability
+        
+        # Compute weights using exponential decay
+        weights = []
+        probabilities = []
+        
+        for visit in valid_visits:
+            days_diff = abs((visit.visit_date - today).days)
+            weight = exp(-days_diff / tau)
+            weights.append(weight)
+            probabilities.append(visit.eligibility_probability)
+        
+        # Normalize weights
+        total_weight = sum(weights)
+        if total_weight == 0:
+            return None
+        
+        # Compute weighted average
+        weighted_sum = sum(p * w for p, w in zip(probabilities, weights))
+        weighted_avg = weighted_sum / total_weight
+        
+        logger.debug(
+            f"Computed weighted average probability: {weighted_avg:.2%} "
+            f"from {len(valid_visits)} visits (tau={tau} days)"
+        )
+        
+        return weighted_avg
     
     async def _check_and_perform_eligibility_check(
         self,
         case_state: CaseState,
         session_id: Optional[int] = None
-    ) -> CaseState:
+    ) -> Dict[str, Any]:
         """
         Perform 270 eligibility transaction if not already cached.
-        Updates CaseState with eligibility status, coverage dates, product type, plan name.
+        Returns the raw eligibility check result (not updated CaseState).
+        The result should be applied deterministically via _deterministically_update_case_state.
         """
         from nexus.tools.eligibility.eligibility_270_transaction import Eligibility270TransactionTool
         
@@ -458,12 +596,21 @@ class EligibilityOrchestrator:
                 current_member_id = case_state.patient.member_id
                 
                 if cached_member_id == current_member_id:
+                    # Determine status from cached result for emitting
+                    active_window = None
+                    for window in cached_result.get("eligibility_windows", []):
+                        if window.get("status") == "active":
+                            active_window = window
+                            break
+                    
+                    status = EligibilityStatus.YES if active_window else EligibilityStatus.NO
+                    
                     # Emit thinking message with cached eligibility metadata
                     eligibility_metadata = {
                         "data_type": "eligibility",
-                        "status": case_state.eligibility_truth.status.value,
-                        "coverage_start": case_state.eligibility_truth.coverage_window_start,
-                        "coverage_end": case_state.eligibility_truth.coverage_window_end,
+                        "status": status.value,
+                        "coverage_start": active_window["effective_date"] if active_window else None,
+                        "coverage_end": active_window["end_date"] if active_window else None,
                         "product_type": case_state.health_plan.product_type.value if case_state.health_plan.product_type != ProductType.UNKNOWN else None,
                         "plan_name": case_state.health_plan.plan_name,
                         "member_id": case_state.patient.member_id,
@@ -471,9 +618,9 @@ class EligibilityOrchestrator:
                         "summary": f"Using cached eligibility check for member {current_member_id}",
                         "cached": True
                     }
-                    eligibility_message = f"Eligibility check (cached): {case_state.eligibility_truth.status.value}"
-                    if case_state.eligibility_truth.coverage_window_start and case_state.eligibility_truth.coverage_window_end:
-                        eligibility_message += f" - Coverage: {case_state.eligibility_truth.coverage_window_start} to {case_state.eligibility_truth.coverage_window_end}"
+                    eligibility_message = f"Eligibility check (cached): {status.value}"
+                    if active_window:
+                        eligibility_message += f" - Coverage: {active_window['effective_date']} to {active_window['end_date']}"
                     await self._emit_thinking_message(
                         session_id,
                         "patient_loading",
@@ -485,11 +632,11 @@ class EligibilityOrchestrator:
                         session_id,
                         "eligibility_check",
                         "complete",
-                        f"Using cached eligibility check for member {current_member_id}: {case_state.eligibility_truth.status.value}",
+                        f"Using cached eligibility check for member {current_member_id}: {status.value}",
                         {
-                            "status": case_state.eligibility_truth.status.value,
-                            "coverage_start": case_state.eligibility_truth.coverage_window_start,
-                            "coverage_end": case_state.eligibility_truth.coverage_window_end,
+                            "status": status.value,
+                            "coverage_start": active_window["effective_date"] if active_window else None,
+                            "coverage_end": active_window["end_date"] if active_window else None,
                             "product_type": case_state.health_plan.product_type.value if case_state.health_plan.product_type != ProductType.UNKNOWN else None,
                             "plan_name": case_state.health_plan.plan_name,
                             "member_id": case_state.patient.member_id,
@@ -497,7 +644,7 @@ class EligibilityOrchestrator:
                             "cached": True
                         }
                     )
-                    return case_state
+                    return cached_result
             except Exception as e:
                 logger.debug(f"Error parsing cached eligibility result: {e}, performing new check")
         
@@ -511,61 +658,30 @@ class EligibilityOrchestrator:
                 insurance_name=case_state.health_plan.payer_name
             )
             
-            # Update CaseState
-            case_state.eligibility_check.checked = True
-            case_state.eligibility_check.check_date = date.today()
-            case_state.eligibility_check.source = EligibilityCheckSource.CLEARINGHOUSE
-            case_state.eligibility_check.result_raw = json.dumps(result)
-            
-            # Find active window
+            # Find active window for emitting
             active_window = None
             for window in result.get("eligibility_windows", []):
                 if window.get("status") == "active":
                     active_window = window
                     break
             
+            status = EligibilityStatus.YES if active_window else EligibilityStatus.NO
+            
             if active_window:
-                case_state.eligibility_truth.status = EligibilityStatus.YES
-                case_state.eligibility_truth.coverage_window_start = active_window["effective_date"]
-                case_state.eligibility_truth.coverage_window_end = active_window["end_date"]
-                
-                # Infer product type if not set
-                if case_state.health_plan.product_type == ProductType.UNKNOWN:
-                    plan_name_lower = active_window.get("plan_name", "").lower()
-                    payer_name_lower = case_state.health_plan.payer_name.lower() if case_state.health_plan.payer_name else ""
-                    
-                    if "medicaid" in plan_name_lower or "medicaid" in payer_name_lower:
-                        case_state.health_plan.product_type = ProductType.MEDICAID
-                    elif "medicare" in plan_name_lower or "medicare" in payer_name_lower:
-                        case_state.health_plan.product_type = ProductType.MEDICARE
-                    elif "dsnp" in plan_name_lower:
-                        case_state.health_plan.product_type = ProductType.DSNP
-                    elif any(term in plan_name_lower for term in ["commercial", "ppo", "hmo", "epo"]):
-                        case_state.health_plan.product_type = ProductType.COMMERCIAL
-                    else:
-                        case_state.health_plan.product_type = ProductType.COMMERCIAL
-                
-                # Update plan name if not set
-                if not case_state.health_plan.plan_name or case_state.health_plan.plan_name == "UNKNOWN":
-                    case_state.health_plan.plan_name = active_window.get("plan_name")
-                
                 summary = (
                     f"✅ Member {case_state.patient.member_id} is ELIGIBLE. "
                     f"Coverage period: {active_window['effective_date']} to {active_window['end_date']}. "
-                    f"Status: Active coverage confirmed via 270 transaction. "
-                    f"Product type determined: {case_state.health_plan.product_type.value}. "
-                    f"Plan name: {case_state.health_plan.plan_name}"
+                    f"Status: Active coverage confirmed via 270 transaction."
                 )
             else:
-                case_state.eligibility_truth.status = EligibilityStatus.NO
                 summary = f"❌ Member {case_state.patient.member_id} is NOT ELIGIBLE."
             
             # Emit thinking message with eligibility metadata
             eligibility_metadata = {
                 "data_type": "eligibility",
-                "status": case_state.eligibility_truth.status.value,
-                "coverage_start": case_state.eligibility_truth.coverage_window_start,
-                "coverage_end": case_state.eligibility_truth.coverage_window_end,
+                "status": status.value,
+                "coverage_start": active_window["effective_date"] if active_window else None,
+                "coverage_end": active_window["end_date"] if active_window else None,
                 "product_type": case_state.health_plan.product_type.value if case_state.health_plan.product_type != ProductType.UNKNOWN else None,
                 "plan_name": case_state.health_plan.plan_name,
                 "member_id": case_state.patient.member_id,
@@ -573,7 +689,7 @@ class EligibilityOrchestrator:
                 "summary": summary,
                 "cached": False
             }
-            eligibility_message = f"Eligibility check: {case_state.eligibility_truth.status.value}"
+            eligibility_message = f"Eligibility check: {status.value}"
             if active_window:
                 eligibility_message += f" - Coverage: {active_window['effective_date']} to {active_window['end_date']}"
             await self._emit_thinking_message(
@@ -587,11 +703,11 @@ class EligibilityOrchestrator:
                 session_id,
                 "eligibility_check",
                 "complete",
-                f"Eligibility check complete: {case_state.eligibility_truth.status.value}. {summary}",
+                f"Eligibility check complete: {status.value}. {summary}",
                 {
-                    "status": case_state.eligibility_truth.status.value,
-                    "coverage_start": case_state.eligibility_truth.coverage_window_start,
-                    "coverage_end": case_state.eligibility_truth.coverage_window_end,
+                    "status": status.value,
+                    "coverage_start": active_window["effective_date"] if active_window else None,
+                    "coverage_end": active_window["end_date"] if active_window else None,
                     "product_type": case_state.health_plan.product_type.value if case_state.health_plan.product_type != ProductType.UNKNOWN else None,
                     "plan_name": case_state.health_plan.plan_name,
                     "member_id": case_state.patient.member_id,
@@ -599,9 +715,155 @@ class EligibilityOrchestrator:
                     "summary": summary
                 }
             )
+            
+            return result
         except Exception as e:
             logger.error(f"Failed to perform eligibility check: {e}", exc_info=True)
             await self._emit_process_event(session_id, "eligibility_check", "error", f"Eligibility check failed: {str(e)}")
+            return {}
+    
+    def _deterministically_update_case_state(
+        self,
+        case_state: CaseState,
+        update_source: str,  # "eligibility_check", "interpreter", "scoring"
+        updates: Dict[str, Any],
+        eligibility_check_result: Optional[Dict[str, Any]] = None
+    ) -> CaseState:
+        """
+        Deterministically update CaseState based on trusted sources.
+        
+        Args:
+            case_state: Current case state
+            update_source: Source of updates ("eligibility_check", "interpreter", "scoring")
+            updates: Dictionary of updates to apply
+            eligibility_check_result: Raw eligibility check result (if update_source is "eligibility_check")
+        
+        Returns:
+            Updated CaseState
+        """
+        logger.info(f"Deterministically updating case state from {update_source}")
+        
+        if update_source == "eligibility_check":
+            # Updates from 270 transaction result
+            if eligibility_check_result:
+                active_window = None
+                for window in eligibility_check_result.get("eligibility_windows", []):
+                    if window.get("status") == "active":
+                        active_window = window
+                        break
+                
+                if active_window:
+                    # Update eligibility_truth deterministically
+                    case_state.eligibility_truth.status = EligibilityStatus.YES
+                    case_state.eligibility_truth.coverage_window_start = active_window["effective_date"]
+                    case_state.eligibility_truth.coverage_window_end = active_window["end_date"]
+                    case_state.eligibility_truth.evidence_strength = EvidenceStrength.HIGH
+                    
+                    # Infer product type deterministically
+                    if case_state.health_plan.product_type == ProductType.UNKNOWN:
+                        plan_name_lower = active_window.get("plan_name", "").lower()
+                        payer_name_lower = case_state.health_plan.payer_name.lower() if case_state.health_plan.payer_name else ""
+                        
+                        if "medicaid" in plan_name_lower or "medicaid" in payer_name_lower:
+                            case_state.health_plan.product_type = ProductType.MEDICAID
+                        elif "medicare" in plan_name_lower or "medicare" in payer_name_lower:
+                            case_state.health_plan.product_type = ProductType.MEDICARE
+                        elif "dsnp" in plan_name_lower:
+                            case_state.health_plan.product_type = ProductType.DSNP
+                        elif any(term in plan_name_lower for term in ["commercial", "ppo", "hmo", "epo"]):
+                            case_state.health_plan.product_type = ProductType.COMMERCIAL
+                        else:
+                            case_state.health_plan.product_type = ProductType.COMMERCIAL
+                    
+                    # Update plan name if not set
+                    if not case_state.health_plan.plan_name or case_state.health_plan.plan_name == "UNKNOWN":
+                        case_state.health_plan.plan_name = active_window.get("plan_name")
+                else:
+                    # No active window found - patient is NOT eligible
+                    case_state.eligibility_truth.status = EligibilityStatus.NO
+                    case_state.eligibility_truth.evidence_strength = EvidenceStrength.HIGH
+                    # Clear coverage window since there's no active coverage
+                    case_state.eligibility_truth.coverage_window_start = None
+                    case_state.eligibility_truth.coverage_window_end = None
+                
+                # Update eligibility_check metadata
+                case_state.eligibility_check.checked = True
+                case_state.eligibility_check.check_date = date.today()
+                case_state.eligibility_check.source = EligibilityCheckSource.CLEARINGHOUSE
+                case_state.eligibility_check.result_raw = json.dumps(eligibility_check_result)
+        
+        elif update_source == "interpreter":
+            # Updates from LLM interpretation (user input)
+            # Only apply safe, validated updates
+            
+            # Patient updates
+            if updates.get("patient_updates") and isinstance(updates["patient_updates"], dict):
+                patient_updates = updates["patient_updates"]
+                if "first_name" in patient_updates and patient_updates["first_name"]:
+                    case_state.patient.first_name = patient_updates["first_name"]
+                if "last_name" in patient_updates and patient_updates["last_name"]:
+                    case_state.patient.last_name = patient_updates["last_name"]
+                if "date_of_birth" in patient_updates and patient_updates["date_of_birth"]:
+                    # Parse and validate date
+                    try:
+                        if isinstance(patient_updates["date_of_birth"], str):
+                            case_state.patient.date_of_birth = datetime.fromisoformat(patient_updates["date_of_birth"]).date()
+                        elif isinstance(patient_updates["date_of_birth"], date):
+                            case_state.patient.date_of_birth = patient_updates["date_of_birth"]
+                    except Exception as e:
+                        logger.warning(f"Invalid date_of_birth in interpreter updates: {e}")
+                if "member_id" in patient_updates and patient_updates["member_id"]:
+                    case_state.patient.member_id = patient_updates["member_id"]
+                if "sex" in patient_updates and patient_updates["sex"]:
+                    try:
+                        case_state.patient.sex = Sex(patient_updates["sex"])
+                    except ValueError:
+                        logger.warning(f"Invalid sex value: {patient_updates['sex']}")
+            
+            # Health plan updates
+            if updates.get("health_plan_updates") and isinstance(updates["health_plan_updates"], dict):
+                hp_updates = updates["health_plan_updates"]
+                if "payer_name" in hp_updates and hp_updates["payer_name"]:
+                    case_state.health_plan.payer_name = hp_updates["payer_name"]
+                if "payer_id" in hp_updates and hp_updates["payer_id"]:
+                    case_state.health_plan.payer_id = hp_updates["payer_id"]
+                if "plan_name" in hp_updates and hp_updates["plan_name"]:
+                    case_state.health_plan.plan_name = hp_updates["plan_name"]
+                if "product_type" in hp_updates and hp_updates["product_type"]:
+                    try:
+                        case_state.health_plan.product_type = ProductType(hp_updates["product_type"])
+                    except ValueError:
+                        logger.warning(f"Invalid product_type: {hp_updates['product_type']}")
+                if "contract_status" in hp_updates and hp_updates["contract_status"]:
+                    try:
+                        case_state.health_plan.contract_status = ContractStatus(hp_updates["contract_status"])
+                    except ValueError:
+                        logger.warning(f"Invalid contract_status: {hp_updates['contract_status']}")
+            
+            # Timing updates
+            if updates.get("timing_updates") and isinstance(updates["timing_updates"], dict):
+                timing_updates = updates["timing_updates"]
+                if "dos_date" in timing_updates and timing_updates["dos_date"]:
+                    try:
+                        if isinstance(timing_updates["dos_date"], str):
+                            case_state.timing.dos_date = datetime.fromisoformat(timing_updates["dos_date"]).date()
+                        elif isinstance(timing_updates["dos_date"], date):
+                            case_state.timing.dos_date = timing_updates["dos_date"]
+                        # Deterministically set event_tense
+                        if case_state.timing.dos_date:
+                            today = date.today()
+                            if case_state.timing.dos_date <= today:
+                                case_state.timing.event_tense = EventTense.PAST
+                            else:
+                                case_state.timing.event_tense = EventTense.FUTURE
+                    except Exception as e:
+                        logger.warning(f"Invalid dos_date in interpreter updates: {e}")
+        
+        elif update_source == "scoring":
+            # Updates from scoring results (if any)
+            # For now, scoring doesn't update case_state, but this is a placeholder
+            # for future deterministic updates based on score_state
+            pass
         
         return case_state
     

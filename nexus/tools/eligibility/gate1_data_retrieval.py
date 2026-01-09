@@ -33,9 +33,14 @@ class EMRPatientDemographicsRetriever(NexusTool):
             
             simulator = PatientSimulator()
             patient_data = simulator.generate_synthetic_patient(patient_id)
-            demographics = patient_data.get("demographics", {})
+            demographics = patient_data.get("demographics")
             
-            logger.info(f"Successfully generated demographics for {patient_id}: {demographics.get('first_name')} {demographics.get('last_name')}")
+            # Handle test scenario where demographics is None
+            if demographics is None:
+                logger.info(f"Test scenario: {patient_id} - demographics is None (missing data)")
+                return {}
+            
+            logger.info(f"Successfully generated demographics for {patient_id}: {demographics.get('first_name', 'N/A')} {demographics.get('last_name', 'N/A')}")
             return {
                 "member_id": demographics.get("member_id"),
                 "first_name": demographics.get("first_name"),
@@ -71,9 +76,14 @@ class EMRPatientInsuranceInfoRetriever(NexusTool):
             
             simulator = PatientSimulator()
             patient_data = simulator.generate_synthetic_patient(patient_id)
-            health_plan = patient_data.get("health_plan", {})
+            health_plan = patient_data.get("health_plan")
             
-            logger.info(f"Successfully generated insurance for {patient_id}: {health_plan.get('payer_name')}")
+            # Handle test scenario where health_plan is None
+            if health_plan is None:
+                logger.info(f"Test scenario: {patient_id} - health_plan is None (missing data)")
+                return {}
+            
+            logger.info(f"Successfully generated insurance for {patient_id}: {health_plan.get('payer_name', 'N/A')}")
             return {
                 "payer_name": health_plan.get("payer_name"),
                 "payer_id": health_plan.get("payer_id"),

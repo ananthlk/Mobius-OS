@@ -247,6 +247,16 @@ class EligibilityPlanner:
 CRITICAL: The following fields are MISSING and MUST be collected: {missing_fields_text}
 You MUST generate at least one question for each missing field. Do NOT return empty arrays.
 Questions should directly ask for the missing information in a natural, conversational way."""
+        else:
+            # When all fields are complete, generate a summary of the results
+            critical_instruction = """
+
+CRITICAL: All required fields are complete. Generate a presentation_summary that:
+1. Acknowledges the user's input and thanks them for providing the information
+2. Provides the eligibility probability and status (from score_state.base_probability and eligibility_truth.status)
+3. Summarizes the key findings from the eligibility check
+4. Offers next steps or recommendations based on the results
+The presentation_summary should be informative and helpful, not empty or generic. It should be a complete, conversational response that the user can read."""
         
         prompt = f"""Current CaseState:
 {case_state.model_dump_json(indent=2)}
@@ -278,13 +288,15 @@ Generate next questions and improvement plan. Return JSON with:
       "priority": 1
     }}
   ],
-  "presentation_summary": "Summary text explaining what information is needed and why"
+  "presentation_summary": "Summary text explaining what information is needed and why, OR if all fields are complete, provide the eligibility results and recommendations"
 }}
 
 IMPORTANT: 
 - next_questions and improvement_plan must be arrays of objects, not strings.
 - If there are missing fields, you MUST generate questions to collect them.
-- The presentation_summary should clearly state what information is needed.
+- The presentation_summary should ALWAYS be meaningful and informative.
+- If all fields are complete, the presentation_summary should provide the eligibility results and acknowledge the user's input.
 - Do NOT return empty arrays when fields are missing.
+- Do NOT return empty or generic presentation_summary when fields are complete.
 """
         return prompt

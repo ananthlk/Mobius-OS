@@ -174,13 +174,48 @@ class PropensityRepository:
         contract_status = case_state.health_plan.contract_status.value if case_state.health_plan.contract_status != ContractStatus.UNKNOWN else None
         event_tense = case_state.timing.event_tense.value if case_state.timing.event_tense != EventTense.UNKNOWN else None
         payer_id = case_state.health_plan.payer_id
-        sex = case_state.patient.sex.value if case_state.patient.sex and case_state.patient.sex != Sex.UNKNOWN else None
+        # Handle sex field - could be enum or string
+        sex = None
+        if case_state.patient.sex:
+            if isinstance(case_state.patient.sex, str):
+                sex = case_state.patient.sex if case_state.patient.sex != "UNKNOWN" else None
+            elif hasattr(case_state.patient.sex, 'value'):
+                sex = case_state.patient.sex.value if case_state.patient.sex != Sex.UNKNOWN else None
+            else:
+                sex = str(case_state.patient.sex) if str(case_state.patient.sex) != "UNKNOWN" else None
         
         # Age bucket
         age_bucket = None
         if case_state.patient.date_of_birth and case_state.timing.dos_date:
-            from datetime import date
-            age = (case_state.timing.dos_date - case_state.patient.date_of_birth).days // 365
+            from datetime import date, datetime
+            # Handle date_of_birth - could be date, datetime, or string
+            dob = case_state.patient.date_of_birth
+            if isinstance(dob, str):
+                try:
+                    dob = datetime.fromisoformat(dob).date()
+                except (ValueError, TypeError):
+                    try:
+                        dob = datetime.strptime(dob, "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        dob = None
+            elif isinstance(dob, datetime):
+                dob = dob.date()
+            
+            # Handle dos_date - could be date or string
+            dos = case_state.timing.dos_date
+            if isinstance(dos, str):
+                try:
+                    dos = datetime.fromisoformat(dos).date()
+                except (ValueError, TypeError):
+                    try:
+                        dos = datetime.strptime(dos, "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        dos = None
+            elif isinstance(dos, datetime):
+                dos = dos.date()
+            
+            if dob and dos:
+                age = (dos - dob).days // 365
             if age < 18:
                 age_bucket = "0-17"
             elif age < 26:

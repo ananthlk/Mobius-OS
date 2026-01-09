@@ -35,8 +35,14 @@ export default function ThinkingContainer({
             {/* Timeline line and icon */}
             <div className="flex flex-col items-center flex-shrink-0">
                 <Tooltip content="AI thinking process - shows the reasoning steps the agent takes to understand and respond to your request">
-                    <div className={`w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center border-2 border-white shadow-sm cursor-help ${showStreaming ? 'animate-spin' : ''}`}>
-                        <Bot size={12} />
+                    <div className="relative">
+                        <div className={`w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center border-2 border-white shadow-sm cursor-help ${showStreaming ? 'animate-spin' : ''}`}>
+                            <Bot size={12} />
+                        </div>
+                        {/* Processing indicator - pulsing ring when streaming */}
+                        {showStreaming && (
+                            <div className="absolute inset-0 rounded-full border-2 border-blue-400 animate-ping opacity-75"></div>
+                        )}
                     </div>
                 </Tooltip>
                 {shouldShowContent && (
@@ -51,12 +57,16 @@ export default function ThinkingContainer({
                     className="w-full text-left flex items-center justify-between gap-2 py-1.5 group"
                 >
                     <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-0.5 h-4 bg-blue-500 flex-shrink-0"></div>
+                        {/* Processing indicator bar - animated when streaming */}
+                        <div className={`w-0.5 h-4 flex-shrink-0 ${showStreaming ? 'bg-blue-500 animate-pulse' : 'bg-blue-500'}`}></div>
                         <span className="text-xs text-blue-600 font-medium truncate">
                             {showStreaming ? (
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></span>
-                                    <span>Thinking</span>
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                    </span>
+                                    <span>Processing</span>
                                     <span className="inline-block">
                                         <span className="animate-dots-1">.</span>
                                         <span className="animate-dots-2">.</span>
