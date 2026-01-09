@@ -7,6 +7,7 @@ Implements waterfall/backoff strategy.
 import logging
 from typing import Optional, Dict, Any, List
 from nexus.modules.database import database
+from nexus.agents.eligibility_v2.models import CaseState, EligibilityStatus, ProductType, ContractStatus, Sex, EventTense
 
 logger = logging.getLogger("nexus.eligibility_v2.propensity_repository")
 
@@ -158,3 +159,113 @@ class PropensityRepository:
             logger.warning(f"Failed to query transactions: {e}")
         
         return None
+    
+    async def get_historical_propensity_by_state(
+        self, case_state: CaseState
+    ) -> Dict[EligibilityStatus, float]:
+        """
+        Get historical propensity for all 4 states using waterfall strategy.
+        
+        Returns:
+            Dict mapping EligibilityStatus to probability for each state
+        """
+        # Extract dimensions from case state
+        product_type = case_state.health_plan.product_type.value if case_state.health_plan.product_type != ProductType.UNKNOWN else None
+        contract_status = case_state.health_plan.contract_status.value if case_state.health_plan.contract_status != ContractStatus.UNKNOWN else None
+        event_tense = case_state.timing.event_tense.value if case_state.timing.event_tense != EventTense.UNKNOWN else None
+        payer_id = case_state.health_plan.payer_id
+        sex = case_state.patient.sex.value if case_state.patient.sex and case_state.patient.sex != Sex.UNKNOWN else None
+        
+        # Age bucket
+        age_bucket = None
+        if case_state.patient.date_of_birth and case_state.timing.dos_date:
+            from datetime import date
+            age = (case_state.timing.dos_date - case_state.patient.date_of_birth).days // 365
+            if age < 18:
+                age_bucket = "0-17"
+            elif age < 26:
+                age_bucket = "18-25"
+            elif age < 36:
+                age_bucket = "26-35"
+            elif age < 46:
+                age_bucket = "36-45"
+            elif age < 56:
+                age_bucket = "46-55"
+            elif age < 66:
+                age_bucket = "56-65"
+            else:
+                age_bucket = "66+"
+        
+        # Build dimensions dict
+        dims = {}
+        if payer_id:
+            dims["payer_id"] = payer_id
+        if product_type:
+            dims["product_type"] = product_type
+        if contract_status:
+            dims["contract_status"] = contract_status
+        if event_tense:
+            dims["event_tense"] = event_tense
+        if sex:
+            dims["sex"] = sex
+        if age_bucket:
+            dims["age_bucket"] = age_bucket
+        
+        # Query each state separately
+        results = {}
+        for status in [EligibilityStatus.YES, EligibilityStatus.NO, EligibilityStatus.NOT_ESTABLISHED, EligibilityStatus.UNKNOWN]:
+            prob = await self._query_state_propensity(status, dims)
+            results[status] = prob
+        
+        # Normalize to sum to 1.0
+        total = sum(results.values())
+        if total > 0:
+            results = {k: v / total for k, v in results.items()}
+        else:
+            # Fallback: uniform distribution
+            results = {k: 0.25 for k in results.keys()}
+        
+        return results
+    
+    async def _query_state_propensity(
+        self, status: EligibilityStatus, dims: Dict[str, str]
+    ) -> float:
+        """Query propensity for a specific state"""
+        # Build WHERE clause
+        conditions = []
+        values = {}
+        
+        for key, value in dims.items():
+            if value:
+                conditions.append(f"{key} = :{key}")
+                values[key] = value
+        
+        # Map status to database value
+        status_map = {
+            EligibilityStatus.YES: "YES",
+            EligibilityStatus.NO: "NO",
+            EligibilityStatus.NOT_ESTABLISHED: "NOT_ESTABLISHED",
+            EligibilityStatus.UNKNOWN: "UNKNOWN"
+        }
+        status_value = status_map.get(status, "UNKNOWN")
+        
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
+        query = f"""
+            SELECT 
+                COUNT(*) as n,
+                AVG(CASE WHEN eligibility_status = :status THEN 1.0 ELSE 0.0 END) as probability
+            FROM eligibility_transactions
+            WHERE {where_clause}
+        """
+        values["status"] = status_value
+        
+        try:
+            row = await database.fetch_one(query=query, values=values)
+            if row and row.get("n", 0) > 0:
+                return float(row["probability"] or 0.0)
+        except Exception as e:
+            logger.warning(f"Failed to query state propensity for {status.value}: {e}")
+        
+        # Fallback: return 0 if no data
+        return 0.0

@@ -263,7 +263,7 @@ async def get_process_events(
     case_id: str,
     x_session_id: Optional[str] = Header(None, alias="X-Session-ID")
 ):
-    """Get process events for the current turn"""
+    """Get all process events for the session (persists across turns)"""
     session_id = int(x_session_id) if x_session_id else None
     if not session_id:
         return {"events": []}
@@ -271,51 +271,19 @@ async def get_process_events(
     try:
         from nexus.modules.database import database
         
-        # Find the last user message in OUTPUT bucket
-        last_user_query = """
-            SELECT created_at
+        # Get ALL process events for this session (not filtered by turn)
+        # This ensures thinking messages from previous turns remain visible
+        query = """
+            SELECT payload, created_at, bucket_type
             FROM memory_events 
             WHERE session_id = :sid 
-            AND bucket_type = 'OUTPUT' 
-            AND payload->>'role' = 'user'
-            ORDER BY created_at DESC 
-            LIMIT 1
+            AND (bucket_type = 'ELIGIBILITY_PROCESS' OR bucket_type = 'THINKING')
+            ORDER BY created_at ASC
         """
-        last_user_result = await database.fetch_one(query=last_user_query, values={"sid": session_id})
-        
-        # Build query - filter by timestamp if we have a user message
-        cutoff_timestamp = None
-        if last_user_result:
-            cutoff_timestamp = dict(last_user_result).get("created_at")
-        
-        if cutoff_timestamp:
-            query = """
-                SELECT payload, created_at, bucket_type
-                FROM memory_events 
-                WHERE session_id = :sid 
-                AND (bucket_type = 'ELIGIBILITY_PROCESS' OR bucket_type = 'THINKING')
-                AND created_at > :cutoff
-                ORDER BY created_at ASC
-            """
-            results = await database.fetch_all(
-                query=query,
-                values={"sid": session_id, "cutoff": cutoff_timestamp}
-            )
-        else:
-            # Fallback: last 5 minutes
-            cutoff = datetime.now() - timedelta(minutes=5)
-            query = """
-                SELECT payload, created_at, bucket_type
-                FROM memory_events 
-                WHERE session_id = :sid 
-                AND (bucket_type = 'ELIGIBILITY_PROCESS' OR bucket_type = 'THINKING')
-                AND created_at > :cutoff
-                ORDER BY created_at ASC
-            """
-            results = await database.fetch_all(
-                query=query,
-                values={"sid": session_id, "cutoff": cutoff}
-            )
+        results = await database.fetch_all(
+            query=query,
+            values={"sid": session_id}
+        )
         
         events = []
         thinking_messages_by_phase = {}  # Group thinking messages by phase

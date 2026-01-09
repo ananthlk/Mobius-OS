@@ -25,6 +25,16 @@ from dataclasses import dataclass
 
 logger = logging.getLogger("nexus.core.json_parser")
 
+# Try to import jsonrepair for robust JSON repair
+try:
+    from ssm_jsonrepair.jsonrepair import JsonRepair
+    JSONREPAIR_AVAILABLE = True
+    # Don't create instance here - create per-use since it has internal state
+    logger.info("✅ ssm-jsonrepair imported successfully")
+except ImportError as e:
+    JSONREPAIR_AVAILABLE = False
+    logger.warning(f"⚠️ ssm-jsonrepair not available: {e}. JSON repair will be disabled.")
+
 
 @dataclass
 class ParseResult:
@@ -83,11 +93,41 @@ class LLMResponseParser:
         if not json_str:
             return ParseResult(None, False, "No JSON object found")
         
-        # Step 3: Parse JSON
+        # Step 2.5: Remove JSON comments (simple fallback)
+        # This handles // style comments which are common in LLM responses
+        json_str_cleaned = self._remove_json_comments(json_str)
+        
+        # Step 3: Parse JSON, with repair if needed
         try:
-            data = json.loads(json_str)
-            
-            # Step 4: Normalize if requested
+            data = json.loads(json_str_cleaned)
+        except json.JSONDecodeError as e:
+            # Try to repair malformed JSON if jsonrepair is available
+            if JSONREPAIR_AVAILABLE:
+                try:
+                    logger.debug(f"Attempting to repair malformed JSON: {str(e)[:100]}")
+                    # Create new instance for this repair (jsonrepair modifies internal state)
+                    repairer = JsonRepair()
+                    repaired = repairer.jsonrepair(json_str)
+                    data = json.loads(repaired)
+                    logger.debug("Successfully repaired and parsed JSON")
+                except Exception as repair_error:
+                    logger.debug(f"JSON repair failed: {repair_error}")
+                    return ParseResult(
+                        None, 
+                        False, 
+                        f"JSON parse error (repair failed): {str(repair_error)}"
+                    )
+            else:
+                return ParseResult(
+                    None, 
+                    False, 
+                    f"JSON parse error: {str(e)} (jsonrepair not available)"
+                )
+        except Exception as e:
+            return ParseResult(None, False, f"Parse error: {str(e)}")
+        
+        # Step 4: Normalize if requested
+        try:
             original_format = self._detect_format(data)
             if normalize and format_hint:
                 normalizer = self.normalizers.get(format_hint)
@@ -112,11 +152,8 @@ class LLMResponseParser:
                 normalized=normalized,
                 original_format=original_format
             )
-            
-        except json.JSONDecodeError as e:
-            return ParseResult(None, False, f"JSON parse error: {str(e)}")
         except Exception as e:
-            return ParseResult(None, False, f"Parse error: {str(e)}")
+            return ParseResult(None, False, f"Normalization error: {str(e)}")
     
     def get_fields(
         self, 
@@ -185,6 +222,41 @@ class LLMResponseParser:
         """Remove <thinking>...</thinking> tags."""
         return re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
     
+    def _remove_json_comments(self, json_str: str) -> str:
+        """
+        Remove // style comments from JSON string.
+        This is a simple fallback for when jsonrepair isn't available or fails.
+        """
+        lines = []
+        in_string = False
+        escape_next = False
+        
+        for line in json_str.split('\n'):
+            cleaned_line = []
+            i = 0
+            while i < len(line):
+                char = line[i]
+                
+                if escape_next:
+                    cleaned_line.append(char)
+                    escape_next = False
+                elif char == '\\':
+                    cleaned_line.append(char)
+                    escape_next = True
+                elif char == '"' and not escape_next:
+                    in_string = not in_string
+                    cleaned_line.append(char)
+                elif char == '/' and i + 1 < len(line) and line[i+1] == '/' and not in_string:
+                    # Found // comment outside string, skip rest of line
+                    break
+                else:
+                    cleaned_line.append(char)
+                i += 1
+            
+            lines.append(''.join(cleaned_line))
+        
+        return '\n'.join(lines)
+    
     def _extract_json_string(self, text: str) -> Optional[str]:
         """Extract JSON string from text using multiple strategies."""
         # Strategy 1: Markdown code blocks
@@ -197,16 +269,36 @@ class LLMResponseParser:
             json_str = re.sub(r'```\s*$', '', json_str)
             return json_str.strip()
         
-        # Strategy 2: JSON with common keys
-        json_match = re.search(
-            r'\{[^{}]*(?:"plan_name"|"steps"|"completion_status"|"status"|"collected")[^{}]*\}',
-            text,
-            re.DOTALL
-        )
-        if json_match:
-            return json_match.group(0)
+        # Strategy 2: Find the outermost JSON object by counting braces
+        # This handles nested objects correctly
+        brace_count = 0
+        start_idx = None
         
-        # Strategy 3: Any JSON object (broader match)
+        for i, char in enumerate(text):
+            if char == '{':
+                if brace_count == 0:
+                    start_idx = i
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0 and start_idx is not None:
+                    # Found complete outermost object
+                    json_str = text[start_idx:i+1]
+                    # Try to validate it's at least structurally sound
+                    try:
+                        # Quick validation - check if it can be parsed
+                        json.loads(json_str)
+                        return json_str
+                    except json.JSONDecodeError:
+                        # If jsonrepair is available, we'll try to repair it later
+                        # For now, return it and let the repair step handle it
+                        if JSONREPAIR_AVAILABLE:
+                            return json_str
+                        # Otherwise, continue searching for a valid JSON object
+                        start_idx = None
+                        continue
+        
+        # Strategy 3: Fallback - try to find any JSON object (less reliable)
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             return json_match.group(0)

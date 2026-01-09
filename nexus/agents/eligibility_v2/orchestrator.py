@@ -96,7 +96,17 @@ class EligibilityOrchestrator:
         
         # 6. Score
         await self._emit_process_event(session_id, "scoring", "in_progress", "Scoring engine initiated - calculating eligibility probability...")
-        score_state = await self.scorer.score(case_state)
+        # Create emit callback for calculation steps
+        async def emit_calculation(step: str, data: Dict[str, Any]) -> None:
+            """Emit calculation step as thinking message"""
+            await self._emit_thinking_message(
+                session_id=session_id,
+                phase="scoring",
+                message=f"[Calculation: {step}] {data.get('explanation', data.get('message', ''))}",
+                metadata={"calculation_step": step, **data}
+            )
+        
+        score_state = await self.scorer.score(case_state, emit_calculation=emit_calculation)
         await self._emit_process_event(session_id, "scoring", "complete", "Scoring complete")
         
         # 7. Plan
@@ -237,26 +247,45 @@ class EligibilityOrchestrator:
                                 location=visit.get("location")
                             )
                             visit_infos.append(visit_info)
-                            
-                            # Set DOS if not already set
-                            if not case_state.timing.dos_date:
-                                if visit_info.status == "scheduled" and visit_date >= today:
-                                    case_state.timing.dos_date = visit_date
-                                    case_state.timing.event_tense = EventTense.FUTURE
-                                elif visit_info.status == "completed" and visit_date < today and case_state.timing.event_tense == EventTense.UNKNOWN:
-                                    case_state.timing.dos_date = visit_date
-                                    case_state.timing.event_tense = EventTense.PAST
                         except Exception as e:
                             logger.debug(f"Could not parse visit date {visit_date_str}: {e}")
                             continue
                 
-                # Set event_tense if still unknown
+                # Deterministically set dos_date from visits if not already set
+                if not case_state.timing.dos_date and visit_infos:
+                    # Priority 1: Most future scheduled visit
+                    future_scheduled = [v for v in visit_infos if v.status == "scheduled" and v.visit_date >= today]
+                    if future_scheduled:
+                        # Use the most future scheduled visit
+                        most_future = max(future_scheduled, key=lambda v: v.visit_date)
+                        case_state.timing.dos_date = most_future.visit_date
+                        case_state.timing.event_tense = EventTense.FUTURE
+                        logger.debug(f"Set dos_date from most future scheduled visit: {most_future.visit_date}")
+                    else:
+                        # Priority 2: Most recent completed visit
+                        past_completed = [v for v in visit_infos if v.status == "completed" and v.visit_date < today]
+                        if past_completed:
+                            most_recent = max(past_completed, key=lambda v: v.visit_date)
+                            case_state.timing.dos_date = most_recent.visit_date
+                            case_state.timing.event_tense = EventTense.PAST
+                            logger.debug(f"Set dos_date from most recent completed visit: {most_recent.visit_date}")
+                        else:
+                            # Priority 3: Most recent visit overall (any status)
+                            most_recent = max(visit_infos, key=lambda v: v.visit_date)
+                            case_state.timing.dos_date = most_recent.visit_date
+                            if most_recent.visit_date >= today:
+                                case_state.timing.event_tense = EventTense.FUTURE
+                            else:
+                                case_state.timing.event_tense = EventTense.PAST
+                            logger.debug(f"Set dos_date from most recent visit: {most_recent.visit_date}")
+                
+                # Set event_tense deterministically if dos_date is set but event_tense is unknown
                 if case_state.timing.dos_date and case_state.timing.event_tense == EventTense.UNKNOWN:
-                    today = date.today()
                     if case_state.timing.dos_date >= today:
                         case_state.timing.event_tense = EventTense.FUTURE
                     else:
                         case_state.timing.event_tense = EventTense.PAST
+                    logger.debug(f"Set event_tense based on dos_date: {case_state.timing.dos_date} -> {case_state.timing.event_tense}")
                 
                 # Compute eligibility and probability for each visit (if eligibility check was performed)
                 if case_state.eligibility_check.checked and visit_infos:
@@ -397,7 +426,8 @@ class EligibilityOrchestrator:
             temp_case_state.timing.dos_date = visit_date
             temp_case_state.timing.event_tense = visit_info.event_tense
             
-            score_state = await scorer.score(temp_case_state)
+            # For visit scoring, don't emit calculation steps (too verbose)
+            score_state = await scorer.score(temp_case_state, emit_calculation=None)
             visit_info.eligibility_probability = score_state.base_probability
             logger.debug(
                 f"Computed probability for visit {visit_info.visit_id} ({visit_date}): "

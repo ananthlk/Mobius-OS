@@ -227,6 +227,18 @@ class ScoreState(BaseModel):
     drivers: List[Dict[str, Any]] = Field(default_factory=list)
     missing_inputs: List[str] = Field(default_factory=list)
     scoring_version: str = "v1"
+    # New fields for purist probability model
+    state_probabilities: Optional[Dict[str, float]] = None  # Probabilities for all 4 states
+    risk_probabilities: Optional[Dict[str, float]] = None  # Individual risk probabilities
+    base_probability_source: Optional[Literal["direct_evidence", "historical_fallback"]] = None
+    calculation_explanation: Optional[Dict[str, Any]] = None  # Structured calculation explanation
+    calculation_human_readable: Optional[str] = None  # Human-readable explanation
+    # New fields for purist probability model
+    state_probabilities: Optional[Dict[str, float]] = None  # Probabilities for all 4 states
+    risk_probabilities: Optional[Dict[str, float]] = None  # Individual risk probabilities
+    base_probability_source: Optional[Literal["direct_evidence", "historical_fallback"]] = None
+    calculation_explanation: Optional[Dict[str, Any]] = None  # Structured calculation explanation
+    calculation_human_readable: Optional[str] = None  # Human-readable explanation
 
 
 # ============================================================================

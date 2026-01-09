@@ -10,7 +10,7 @@ from typing import Dict, Any
 from datetime import date
 
 from nexus.agents.eligibility_v2.models import (
-    CaseState, UIEvent, LLMInterpretResponse, EventTense, CompletionStatus
+    CaseState, UIEvent, LLMInterpretResponse, EventTense, CompletionStatus, CompletionStatusModel
 )
 from nexus.agents.eligibility_v2.exceptions import LLMResponseValidationError
 from nexus.services.eligibility_v2.llm_call_repository import LLMCallRepository
@@ -64,14 +64,18 @@ class EligibilityInterpreter:
             )
             
             response_text = llm_response.get("content", "{}")
+            logger.debug(f"Raw LLM response: {response_text[:500]}")  # Log first 500 chars
+            
             parse_result = self.json_parser.extract_json(response_text, normalize=False)
             
             if not parse_result.success or not parse_result.data:
                 error_msg = parse_result.error or "Failed to parse JSON response"
                 logger.error(f"Failed to parse LLM response: {error_msg}")
+                logger.error(f"Raw response was: {response_text[:1000]}")  # Log first 1000 chars for debugging
                 raise LLMResponseValidationError(f"JSON parse error: {error_msg}")
             
             response_data = parse_result.data
+            logger.debug(f"Parsed response data keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'not a dict'}")
             
             # Validate response
             interpret_response = self._validate_response(response_data)
@@ -114,17 +118,26 @@ CRITICAL: Extract product_type and contract_status from natural language:
 - "NON_CONTRACTED" or "non-contracted" → health_plan.contract_status = "NON_CONTRACTED"
 - "the contract is still active" → health_plan.contract_status = "CONTRACTED"
 
-CRITICAL: Date Extraction Examples:
-- "September 20, 2024" or "Sep 20, 2024" → timing.dos_date = "2024-09-20"
-- "9/20/2024" → timing.dos_date = "2024-09-20"
-- "it is 2026-02-01" → timing.dos_date = "2026-02-01"
-- Always convert dates to ISO format (YYYY-MM-DD)
-- After extracting dos_date, set timing.event_tense:
-  * If dos_date is in the past (before today) → event_tense = "PAST"
-  * If dos_date is in the future (after today) → event_tense = "FUTURE"
-  * If dos_date is today → event_tense = "PAST"
+CRITICAL: Date Extraction and Inference:
+1. Extract dos_date from user input if explicitly mentioned:
+   - "September 20, 2024" or "Sep 20, 2024" → timing.dos_date = "2024-09-20"
+   - "9/20/2024" → timing.dos_date = "2024-09-20"
+   - "it is 2026-02-01" → timing.dos_date = "2026-02-01"
+   - Always convert dates to ISO format (YYYY-MM-DD)
 
-Please update the CaseState with information from the user input.
+2. If dos_date is NOT in user input but timing.dos_date is null/missing:
+   - INFER dos_date from timing.related_visits:
+     * If there are scheduled/future visits → use the most future visit_date
+     * If all visits are past → use the most recent visit_date
+     * Priority: scheduled > completed > cancelled
+   - This is CRITICAL: dos_date should NEVER remain null if visits are available
+
+3. After setting dos_date (extracted or inferred), set timing.event_tense:
+   * If dos_date is in the past (before today) → event_tense = "PAST"
+   * If dos_date is in the future (after today) → event_tense = "FUTURE"
+   * If dos_date is today → event_tense = "PAST"
+
+Please update the CaseState with information from the user input, and infer missing fields from available data.
 
 Return JSON with this structure:
 {{
@@ -137,10 +150,74 @@ Return JSON with this structure:
 """
         return prompt
     
+    def _normalize_response_data(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize response data to handle common LLM response issues"""
+        # Deep copy to avoid modifying original
+        normalized = json.loads(json.dumps(response_data))
+        
+        # Normalize updated_case_state if present
+        if "updated_case_state" in normalized and isinstance(normalized["updated_case_state"], dict):
+            case_state = normalized["updated_case_state"]
+            
+            # Handle ineligible_explanation: if it's a string, set to None
+            # (IneligibleExplanation expects an object with loss_timing, reinstate_possible, etc.)
+            if "ineligible_explanation" in case_state:
+                if isinstance(case_state["ineligible_explanation"], str):
+                    logger.debug(f"Normalizing ineligible_explanation from string to None: {case_state['ineligible_explanation']}")
+                    case_state["ineligible_explanation"] = None
+                elif isinstance(case_state["ineligible_explanation"], dict):
+                    # Validate it has the expected structure, otherwise set to None
+                    expected_fields = {"loss_timing", "reinstate_possible", "reinstate_date"}
+                    if not any(key in case_state["ineligible_explanation"] for key in expected_fields):
+                        logger.debug("ineligible_explanation dict missing expected fields, setting to None")
+                        case_state["ineligible_explanation"] = None
+        
+        return normalized
+    
     def _validate_response(self, response_data: Dict[str, Any]) -> LLMInterpretResponse:
         """Validate response against schema"""
         try:
+            # Normalize response data first
+            response_data = self._normalize_response_data(response_data)
+            
+            # Check if response has the expected top-level structure
+            if "updated_case_state" not in response_data or "completion" not in response_data:
+                logger.warning(f"LLM returned partial response. Got keys: {list(response_data.keys())}")
+                
+                # Try to construct full response from partial data
+                # If response_data looks like it might be a nested object, try to extract it
+                if "health_plan" in response_data or "patient" in response_data or "timing" in response_data:
+                    # This looks like a CaseState object, wrap it
+                    logger.info("Attempting to wrap partial response as CaseState")
+                    try:
+                        case_state = CaseState(**response_data)
+                        # Create default completion status
+                        completion = CompletionStatusModel(
+                            status=CompletionStatus.INCOMPLETE,
+                            missing_fields=[]
+                        )
+                        response_data = {
+                            "updated_case_state": case_state.model_dump(),
+                            "completion": completion.model_dump()
+                        }
+                    except Exception as e:
+                        logger.error(f"Failed to construct CaseState from partial response: {e}")
+                        raise LLMResponseValidationError(
+                            f"LLM returned partial response that couldn't be parsed. "
+                            f"Expected 'updated_case_state' and 'completion' fields. "
+                            f"Got: {list(response_data.keys())}"
+                        )
+                else:
+                    # Unknown structure
+                    raise LLMResponseValidationError(
+                        f"LLM returned unexpected response structure. "
+                        f"Expected 'updated_case_state' and 'completion' fields. "
+                        f"Got: {list(response_data.keys())}"
+                    )
+            
             return LLMInterpretResponse(**response_data)
+        except LLMResponseValidationError:
+            raise
         except Exception as e:
             logger.error(f"Invalid LLM response: {e}")
             raise LLMResponseValidationError(f"Invalid response structure: {e}")

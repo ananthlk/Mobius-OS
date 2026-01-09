@@ -86,32 +86,31 @@ export default function EligibilityV2Page() {
 
     return (
         <div className="flex h-full bg-[var(--bg-secondary)] text-[var(--text-primary)] overflow-hidden font-sans">
-            {/* Sidebar */}
-            <div className="w-1/3 border-r border-[var(--border-medium)] bg-[var(--bg-primary)] rounded-l-2xl shadow-[var(--shadow-md)] overflow-hidden">
-                <EligibilitySidebar caseId={caseId} sessionId={sessionId} caseView={caseView} />
-            </div>
-            
-            {/* Main Chat Area */}
-            <div className="flex-1 flex flex-col h-full min-w-0 bg-[var(--bg-primary)] rounded-r-2xl shadow-[var(--shadow-md)]">
-                {/* Header */}
-                <div className="h-20 border-b border-[var(--border-subtle)] flex items-center justify-between px-8 bg-[var(--bg-primary)]/80 backdrop-blur-xl z-20 sticky top-0">
-                    <div className="flex flex-col gap-1">
-                        <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight">
-                            Eligibility Agent V2
-                        </h1>
-                        <p className="text-sm text-[var(--text-secondary)] font-normal" suppressHydrationWarning>
-                            Case ID: {caseId}
-                        </p>
-                    </div>
+            <div className="flex-1 flex p-6 gap-6 min-h-0">
+                {/* Sidebar */}
+                <div className="w-1/3 bg-[var(--bg-primary)] rounded-2xl shadow-[var(--shadow-md)] overflow-hidden">
+                    <EligibilitySidebar caseId={caseId} sessionId={sessionId} caseView={caseView} />
                 </div>
                 
-                {/* Chat Content */}
-                <div className="flex-1 overflow-hidden">
-                    <EligibilityChat 
-                        caseId={caseId} 
-                        sessionId={sessionId}
-                        onMessageSent={refreshCaseView}
-                    />
+                {/* Main Chat Area */}
+                <div className="flex-1 flex flex-col h-full min-w-0 bg-[var(--bg-primary)] rounded-2xl shadow-[var(--shadow-md)]">
+                    {/* Header */}
+                    <div className="h-20 border-b border-[var(--border-subtle)] flex items-center justify-between px-8 bg-[var(--bg-primary)]/80 backdrop-blur-xl z-20 sticky top-0">
+                        <div className="flex flex-col gap-1">
+                            <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight">
+                                Eligibility Agent
+                            </h1>
+                        </div>
+                    </div>
+                    
+                    {/* Chat Content */}
+                    <div className="flex-1 overflow-hidden">
+                        <EligibilityChat 
+                            caseId={caseId} 
+                            sessionId={sessionId}
+                            onMessageSent={refreshCaseView}
+                        />
+                    </div>
                 </div>
             </div>
         </div>

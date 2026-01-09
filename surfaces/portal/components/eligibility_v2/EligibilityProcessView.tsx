@@ -518,6 +518,9 @@ function WhatWeFound({ events }: { events: ProcessEvent[] }) {
     if (prob !== undefined) {
       summaryParts.push(`${(prob * 100).toFixed(0)}% probability`);
     }
+  } else if (scoringEvent?.thinking_messages && scoringEvent.thinking_messages.length > 0) {
+    // If we have thinking messages but no score_summary, show that scoring completed
+    summaryParts.push("Scoring complete");
   }
   if (planningEvent?.data) {
     if (planningEvent.data.questions_count) {
@@ -612,52 +615,139 @@ function WhatWeFound({ events }: { events: ProcessEvent[] }) {
                 <ChevronRight size={10} className="text-gray-400 flex-shrink-0" />
               )}
               <span className="font-medium text-gray-700 text-xs">Scoring</span>
-              {scoringEvent?.data?.score_summary && (
+              {scoringEvent && (
                 <span className="text-xs text-gray-500 ml-auto flex-shrink-0">
-                  {scoringEvent.data.score_summary.probability !== undefined 
+                  {scoringEvent.data?.score_summary?.probability !== undefined 
                     ? `${(scoringEvent.data.score_summary.probability * 100).toFixed(0)}%`
-                    : "Complete"}
+                    : (scoringEvent.thinking_messages && scoringEvent.thinking_messages.length > 0)
+                    ? "Complete"
+                    : null}
                 </span>
               )}
             </button>
             
             {scoringExpanded && (
-              <div className="ml-4 mt-1 space-y-1 pb-1 text-xs text-gray-600">
-                {scoringEvent?.data?.score_summary ? (
+              <div className="ml-4 mt-1 space-y-2 pb-1 text-xs text-gray-600">
+                {scoringEvent ? (
                   <>
-                    {scoringEvent.data.score_summary.probability !== undefined && (
-                      <div>
-                        <span className="font-medium">Probability:</span> {(scoringEvent.data.score_summary.probability * 100).toFixed(1)}%
-                      </div>
-                    )}
-                    {scoringEvent.data.score_summary.confidence !== undefined && (
-                      <div>
-                        <span className="font-medium">Confidence:</span> {(scoringEvent.data.score_summary.confidence * 100).toFixed(0)}%
-                      </div>
-                    )}
-                    {scoringEvent.data.score_summary.sample_size && (
-                      <div>
-                        <span className="font-medium">Sample Size:</span> {scoringEvent.data.score_summary.sample_size} transactions
-                      </div>
-                    )}
-                    {scoringEvent.data.score_summary.confidence_interval && (
-                      <div>
-                        <span className="font-medium">Confidence Interval:</span> {Math.round(scoringEvent.data.score_summary.confidence_interval.lower_bound * 100)}% - {Math.round(scoringEvent.data.score_summary.confidence_interval.upper_bound * 100)}%
-                      </div>
-                    )}
-                    {scoringEvent.data.score_summary.volatility && (
-                      <div className="mt-2">
-                        <div className="font-medium text-gray-700 mb-1">Volatility Metrics</div>
-                        <div className="pl-2 space-y-0.5 text-gray-500">
-                          {scoringEvent.data.score_summary.volatility.volatility_score !== undefined && (
-                            <div>Volatility Score: {(scoringEvent.data.score_summary.volatility.volatility_score * 100).toFixed(1)}%</div>
+                    {(() => {
+                      // Extract key mathematical data from thinking messages
+                      let baseProbs: Record<string, number> | null = null;
+                      let baseSource: string | null = null;
+                      let adjustedRisks: Record<string, number> | null = null;
+                      let finalProbs: Record<string, number> | null = null;
+                      let timeGap: number | null = null;
+                      let eventTense: string | null = null;
+
+                      if (scoringEvent.thinking_messages) {
+                        for (const thinking of scoringEvent.thinking_messages) {
+                          const meta = thinking.metadata;
+                          if (meta && typeof meta === 'object') {
+                            if (meta.calculation_step === 'base_probabilities' && meta.probabilities) {
+                              baseProbs = meta.probabilities;
+                              baseSource = meta.source || null;
+                            }
+                            if (meta.calculation_step === 'time_adjustment') {
+                              adjustedRisks = meta.adjusted_risks || null;
+                              timeGap = meta.time_gap_days || null;
+                              eventTense = meta.event_tense || null;
+                            }
+                            if (meta.calculation_step === 'calculation_complete' && meta.final_probabilities) {
+                              finalProbs = meta.final_probabilities;
+                            }
+                          }
+                        }
+                      }
+
+                      // Display succinct mathematical summary
+                      return (
+                        <div className="space-y-2">
+                          {/* Base Probability */}
+                          {baseProbs && (
+                            <div className="border-l-2 border-blue-200 pl-2">
+                              <div className="font-medium text-gray-700 mb-1">Base Probability</div>
+                              {baseProbs.YES !== undefined && (
+                                <div className="text-gray-600">
+                                  Eligible: <span className="font-medium">{(baseProbs.YES * 100).toFixed(0)}%</span>
+                                  {baseSource && (
+                                    <span className="text-gray-400 ml-1">({baseSource === 'direct_evidence' ? 'direct evidence' : 'historical'})</span>
+                                  )}
+                                </div>
+                              )}
+                              {baseProbs.NO !== undefined && baseProbs.NO > 0 && (
+                                <div className="text-gray-600">Not Eligible: {(baseProbs.NO * 100).toFixed(0)}%</div>
+                              )}
+                              {baseProbs.NOT_ESTABLISHED !== undefined && baseProbs.NOT_ESTABLISHED > 0 && (
+                                <div className="text-gray-600">Not Established: {(baseProbs.NOT_ESTABLISHED * 100).toFixed(0)}%</div>
+                              )}
+                            </div>
                           )}
-                          {scoringEvent.data.score_summary.volatility.coefficient_of_variation !== undefined && (
-                            <div>Coefficient of Variation: {scoringEvent.data.score_summary.volatility.coefficient_of_variation.toFixed(3)}</div>
+
+                          {/* Risk Adjustments */}
+                          {adjustedRisks && Object.keys(adjustedRisks).length > 0 && (
+                            <div className="border-l-2 border-orange-200 pl-2">
+                              <div className="font-medium text-gray-700 mb-1">Risk Adjustments</div>
+                              {Object.entries(adjustedRisks).map(([risk, prob]) => {
+                                if (Number(prob) === 0) return null;
+                                const riskLabel = risk.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                return (
+                                  <div key={risk} className="text-gray-600">
+                                    {riskLabel}: <span className="font-medium">{(Number(prob) * 100).toFixed(1)}%</span>
+                                  </div>
+                                );
+                              })}
+                              {timeGap !== null && eventTense && (
+                                <div className="text-gray-400 text-xs mt-1">
+                                  {eventTense === 'PAST' ? `Applied ${timeGap}-day time decay` : `Applied ${timeGap}-day time amplification`}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Final Probabilities */}
+                          {finalProbs && (
+                            <div className="border-l-2 border-green-200 pl-2">
+                              <div className="font-medium text-gray-700 mb-1">Final Probabilities</div>
+                              {finalProbs.YES !== undefined && (
+                                <div className="text-gray-600">
+                                  Eligible: <span className="font-medium">{(finalProbs.YES * 100).toFixed(1)}%</span>
+                                </div>
+                              )}
+                              {finalProbs.NO !== undefined && finalProbs.NO > 0 && (
+                                <div className="text-gray-600">Not Eligible: {(finalProbs.NO * 100).toFixed(1)}%</div>
+                              )}
+                              {finalProbs.NOT_ESTABLISHED !== undefined && finalProbs.NOT_ESTABLISHED > 0 && (
+                                <div className="text-gray-600">Not Established: {(finalProbs.NOT_ESTABLISHED * 100).toFixed(1)}%</div>
+                              )}
+                              {finalProbs.UNKNOWN !== undefined && finalProbs.UNKNOWN > 0 && (
+                                <div className="text-gray-600">Unknown: {(finalProbs.UNKNOWN * 100).toFixed(1)}%</div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Fallback: show legacy score_summary if no thinking messages */}
+                          {!baseProbs && !finalProbs && scoringEvent.data?.score_summary && (
+                            <>
+                              {scoringEvent.data.score_summary.probability !== undefined && (
+                                <div>
+                                  <span className="font-medium">Probability:</span> {(scoringEvent.data.score_summary.probability * 100).toFixed(1)}%
+                                </div>
+                              )}
+                              {scoringEvent.data.score_summary.confidence !== undefined && (
+                                <div>
+                                  <span className="font-medium">Confidence:</span> {(scoringEvent.data.score_summary.confidence * 100).toFixed(0)}%
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {/* No data message */}
+                          {!baseProbs && !finalProbs && !scoringEvent.data?.score_summary && (
+                            <div className="text-gray-500 italic">No scoring data</div>
                           )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </>
                 ) : (
                   <div className="text-gray-500 italic">No scoring data</div>
