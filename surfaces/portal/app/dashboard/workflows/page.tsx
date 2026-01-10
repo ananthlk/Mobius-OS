@@ -486,138 +486,147 @@ export default function WorkflowBuilder() {
 
     // --- RENDER ---
     return (
-        <div className="flex h-screen bg-[var(--bg-secondary)] text-[var(--text-primary)] overflow-hidden font-sans selection:bg-blue-100">
-            {/* VIEW: ENTRY */}
-            {viewMode === "ENTRY" && (
-                <div className="w-full h-full relative z-10">
-                    <ProblemEntry onDiagnose={handleDiagnose} />
-                </div>
-            )}
-
-
-
-            {/* VIEW: SELECTION (2 COLUMN LAYOUT) */}
-            {viewMode === "SELECTION" && (
-                <div className="w-full h-full flex flex-col relative z-10 bg-[var(--bg-secondary)]">
-                    {/* Progress Header */}
-                    <ProgressHeader progress={progressState} />
-                    
-                    <div className="flex-1 flex p-6 gap-6 min-h-0">
-                        {/* Loading overlay - only show if we're waiting for initial API response */}
-                        {isInitializing && diagnosticResults.length === 0 && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-primary)]/80 backdrop-blur-sm z-50 rounded-2xl">
-                                <div className="text-center">
-                                    <MobiusIcon size={32} animated={true} className="mx-auto mb-4" />
-                                    <p className="text-sm text-[var(--text-primary)] font-medium">Initializing workflow builder...</p>
-                                    <p className="text-xs text-[var(--text-muted)] mt-1">Analyzing your request</p>
-                                </div>
-                            </div>
-                        )}
-                        
-                        {/* Left Rail: Process Cards */}
-                        <div className="w-1/3 border-r border-[var(--border-medium)] bg-[var(--bg-primary)] rounded-2xl shadow-[var(--shadow-md)] overflow-hidden">
-                            <ProcessCards
-                                phases={getPhasesFromDraft()}
-                                highlightedSteps={highlightedSteps}
-                                onStepClick={(stepId, phaseId) => {
-                                    // Handle step click if needed
-                                }}
-                            />
-                        </div>
-
-                        {/* Right Side: Chat Window */}
-                        <div className="flex-1 h-full min-w-0">
-                            <ShapingChat
-                                initialQuery={searchQuery || "I have a problem..."}
-                                onUpdate={handleShapingUpdate}
-                                onSessionUpdate={handleSessionUpdate}
-                                sessionId={currentSessionId}
-                                progressState={progressState}
-                            />
-                        </div>
+        <div className="flex flex-col h-screen bg-[var(--bg-secondary)] text-[var(--text-primary)] overflow-hidden font-sans selection:bg-blue-100">
+            {/* Eligibility button at top right */}
+            <div className="flex justify-end pr-8 pt-6">
+                <a
+                    href="/dashboard/eligibility-v2"
+                    className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-2 rounded-xl font-semibold shadow transition"
+                    style={{ transition: "background 0.2s" }}
+                >
+                    Run Eligibility Agent
+                </a>
+            </div>
+            {/* Main workflow/dashboard area */}
+            <div className="flex flex-1 h-full">
+                {/* VIEW: ENTRY */}
+                {viewMode === "ENTRY" && (
+                    <div className="w-full h-full relative z-10">
+                        <ProblemEntry onDiagnose={handleDiagnose} />
                     </div>
-                </div>
-            )}
+                )}
 
-
-            {/* VIEW: EDITOR */}
-            {viewMode === "EDITOR" && (
-                <div className="w-full h-full flex flex-col relative z-10">
-                    {/* Progress Header */}
-                    <ProgressHeader progress={progressState} />
-                    
-                    <div className="flex-1 flex min-h-0">
-                        <ToolPalette 
-                            onSelectTool={handleAddStep}
-                            collapsed={isToolPaletteCollapsed}
-                            onToggleCollapse={() => setIsToolPaletteCollapsed(!isToolPaletteCollapsed)}
-                        />
-
-                        <div className="flex-1 flex flex-col h-full relative z-10 bg-[var(--bg-secondary)]">
-                            {/* Header */}
-                            <div className="h-20 border-b border-[var(--border-subtle)] flex items-center justify-between px-8 bg-[var(--bg-primary)]/80 backdrop-blur-xl z-20 sticky top-0">
-                            <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        type="text"
-                                        placeholder="Untitled Workflow"
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                        className="bg-transparent text-xl font-semibold focus:outline-none placeholder-[var(--text-muted)] w-80 text-[var(--text-primary)] tracking-tight"
-                                    />
-                                    <div className="px-2 py-0.5 rounded-full bg-[var(--primary-blue-light)] border border-[var(--primary-blue)]/20 text-[10px] text-[var(--primary-blue)] uppercase tracking-widest font-bold">
-                                        Draft
+                {/* VIEW: SELECTION (2 COLUMN LAYOUT) */}
+                {viewMode === "SELECTION" && (
+                    <div className="w-full h-full flex flex-col relative z-10 bg-[var(--bg-secondary)]">
+                        {/* Progress Header */}
+                        <ProgressHeader progress={progressState} />
+                        
+                        <div className="flex-1 flex p-6 gap-6 min-h-0">
+                            {/* Loading overlay - only show if we're waiting for initial API response */}
+                            {isInitializing && diagnosticResults.length === 0 && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-primary)]/80 backdrop-blur-sm z-50 rounded-2xl">
+                                    <div className="text-center">
+                                        <MobiusIcon size={32} animated={true} className="mx-auto mb-4" />
+                                        <p className="text-sm text-[var(--text-primary)] font-medium">Initializing workflow builder...</p>
+                                        <p className="text-xs text-[var(--text-muted)] mt-1">Analyzing your request</p>
                                     </div>
                                 </div>
-                                <input
-                                    type="text"
-                                    placeholder="Describe the goal..."
-                                    value={goal}
-                                    onChange={(e) => setGoal(e.target.value)}
-                                    className="bg-transparent text-sm focus:outline-none placeholder-[var(--text-muted)] w-96 text-[var(--text-secondary)] font-normal"
+                            )}
+                            
+                            {/* Left Rail: Process Cards */}
+                            <div className="w-1/3 border-r border-[var(--border-medium)] bg-[var(--bg-primary)] rounded-2xl shadow-[var(--shadow-md)] overflow-hidden">
+                                <ProcessCards
+                                    phases={getPhasesFromDraft()}
+                                    highlightedSteps={highlightedSteps}
+                                    onStepClick={(stepId, phaseId) => {
+                                        // Handle step click if needed
+                                    }}
                                 />
                             </div>
 
-                            <button
-                                onClick={handleSave}
-                                className="bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-2.5 rounded-[var(--radius-lg)] text-sm font-semibold hover:opacity-90 transition-colors shadow-[var(--shadow-md)]"
-                            >
-                                Publish Workflow
-                            </button>
+                            {/* Right Side: Chat Window */}
+                            <div className="flex-1 h-full min-w-0">
+                                <ShapingChat
+                                    initialQuery={searchQuery || "I have a problem..."}
+                                    onUpdate={handleShapingUpdate}
+                                    onSessionUpdate={handleSessionUpdate}
+                                    sessionId={currentSessionId}
+                                    progressState={progressState}
+                                />
+                            </div>
                         </div>
+                    </div>
+                )}
+                {/* VIEW: EDITOR */}
+                {viewMode === "EDITOR" && (
+                    <div className="w-full h-full flex flex-col relative z-10">
+                        {/* Progress Header */}
+                        <ProgressHeader progress={progressState} />
+                        
+                        <div className="flex-1 flex min-h-0">
+                            <ToolPalette 
+                                onSelectTool={handleAddStep}
+                                collapsed={isToolPaletteCollapsed}
+                                onToggleCollapse={() => setIsToolPaletteCollapsed(!isToolPaletteCollapsed)}
+                            />
 
-                        {/* Editor Canvas */}
-                        <div className="flex-1 overflow-y-auto p-12 custom-scrollbar bg-[var(--bg-secondary)]">
-                            {/* Dotted Grid */}
-                            <div className="absolute inset-0 pattern-board-light pointer-events-none opacity-60"></div>
-
-                            <div className="max-w-4xl mx-auto pb-20 relative z-10">
-                                <div className="relative">
-                                    {/* Connector Line */}
-                                    <div className="absolute left-8 top-8 bottom-8 w-0.5 bg-[var(--border-subtle)] -z-10"></div>
-                                    <div className="space-y-6">
-                                        {steps.map((step, idx) => (
-                                            <div key={step.id} className="relative pl-4 animate-in slide-in-from-bottom-4 fade-in">
-                                                {/* Connector Elbow */}
-                                                {idx > 0 && <div className="absolute left-[33px] -top-6 bottom-1/2 w-0.5 bg-[var(--border-subtle)] -z-10"></div>}
-                                                <StepEditor
-                                                    step={step}
-                                                    index={idx}
-                                                    allSteps={steps}
-                                                    toolSchema={selectedSchemaMap[step.tool_name] || { name: step.tool_name, description: "Loaded step", parameters: {} }}
-                                                    onChange={(updated) => handleUpdateStep(idx, updated)}
-                                                    onDelete={() => handleDeleteStep(idx)}
-                                                />
+                            <div className="flex-1 flex flex-col h-full relative z-10 bg-[var(--bg-secondary)]">
+                                {/* Header */}
+                                <div className="h-20 border-b border-[var(--border-subtle)] flex items-center justify-between px-8 bg-[var(--bg-primary)]/80 backdrop-blur-xl z-20 sticky top-0">
+                                    <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="text"
+                                                placeholder="Untitled Workflow"
+                                                value={name}
+                                                onChange={(e) => setName(e.target.value)}
+                                                className="bg-transparent text-xl font-semibold focus:outline-none placeholder-[var(--text-muted)] w-80 text-[var(--text-primary)] tracking-tight"
+                                            />
+                                            <div className="px-2 py-0.5 rounded-full bg-[var(--primary-blue-light)] border border-[var(--primary-blue)]/20 text-[10px] text-[var(--primary-blue)] uppercase tracking-widest font-bold">
+                                                Draft
                                             </div>
-                                        ))}
+                                        </div>
+                                        <input
+                                            type="text"
+                                            placeholder="Describe the goal..."
+                                            value={goal}
+                                            onChange={(e) => setGoal(e.target.value)}
+                                            className="bg-transparent text-sm focus:outline-none placeholder-[var(--text-muted)] w-96 text-[var(--text-secondary)] font-normal"
+                                        />
+                                    </div>
+
+                                    <button
+                                        onClick={handleSave}
+                                        className="bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-2.5 rounded-[var(--radius-lg)] text-sm font-semibold hover:opacity-90 transition-colors shadow-[var(--shadow-md)]"
+                                    >
+                                        Publish Workflow
+                                    </button>
+                                </div>
+
+                                {/* Editor Canvas */}
+                                <div className="flex-1 overflow-y-auto p-12 custom-scrollbar bg-[var(--bg-secondary)]">
+                                    {/* Dotted Grid */}
+                                    <div className="absolute inset-0 pattern-board-light pointer-events-none opacity-60"></div>
+
+                                    <div className="max-w-4xl mx-auto pb-20 relative z-10">
+                                        <div className="relative">
+                                            {/* Connector Line */}
+                                            <div className="absolute left-8 top-8 bottom-8 w-0.5 bg-[var(--border-subtle)] -z-10"></div>
+                                            <div className="space-y-6">
+                                                {steps.map((step, idx) => (
+                                                    <div key={step.id} className="relative pl-4 animate-in slide-in-from-bottom-4 fade-in">
+                                                        {/* Connector Elbow */}
+                                                        {idx > 0 && <div className="absolute left-[33px] -top-6 bottom-1/2 w-0.5 bg-[var(--border-subtle)] -z-10"></div>}
+                                                        <StepEditor
+                                                            step={step}
+                                                            index={idx}
+                                                            allSteps={steps}
+                                                            toolSchema={selectedSchemaMap[step.tool_name] || { name: step.tool_name, description: "Loaded step", parameters: {} }}
+                                                            onChange={(updated) => handleUpdateStep(idx, updated)}
+                                                            onDelete={() => handleDeleteStep(idx)}
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

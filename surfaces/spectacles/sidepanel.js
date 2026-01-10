@@ -63,6 +63,14 @@ const CONTEXTS = {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 Scrape Tree
             </button>
+            <button class="control-btn" id="extract-forms-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 18H8"/><path d="M16 14H8"/><path d="M10 6H8"/></svg>
+                Extract Forms
+            </button>
+            <button class="control-btn" id="start-monitor-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                Monitor Forms
+            </button>
         `
     },
     PATIENT: {
@@ -299,12 +307,20 @@ function attachWebButtonListeners() {
     setTimeout(() => {
         const scrapePageBtn = componentsArea.querySelector('#scrape-page-btn');
         const scrapeTreeBtn = componentsArea.querySelector('#scrape-tree-btn');
+        const extractFormsBtn = componentsArea.querySelector('#extract-forms-btn');
+        const startMonitorBtn = componentsArea.querySelector('#start-monitor-btn');
         
         if (scrapePageBtn) {
             scrapePageBtn.addEventListener('click', handleScrapePage);
         }
         if (scrapeTreeBtn) {
             scrapeTreeBtn.addEventListener('click', handleScrapeTree);
+        }
+        if (extractFormsBtn) {
+            extractFormsBtn.addEventListener('click', handleExtractForms);
+        }
+        if (startMonitorBtn) {
+            startMonitorBtn.addEventListener('click', handleStartFormMonitoring);
         }
     }, 100);
 }
@@ -454,6 +470,118 @@ function handleScrapeTreeResponse(response, loadingId) {
     } else {
         addSystemMessage('⚠️ Failed to scrape DOM tree');
     }
+}
+
+async function handleExtractForms() {
+    const loadingId = addSystemMessage('🔍 Extracting form fields...', true);
+    
+    try {
+        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+            if (!tabs[0]) {
+                removeMessage(loadingId);
+                addSystemMessage('⚠️ No active tab found');
+                return;
+            }
+            
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_FORMS' }, (response) => {
+                removeMessage(loadingId);
+                
+                if (chrome.runtime.lastError) {
+                    addSystemMessage('⚠️ Error: ' + chrome.runtime.lastError.message + '. Try refreshing the page.');
+                    return;
+                }
+                
+                if (response && response.success && response.formData) {
+                    displayFormData(response.formData);
+                } else {
+                    addSystemMessage('⚠️ Failed to extract forms');
+                }
+            });
+        });
+    } catch (error) {
+        removeMessage(loadingId);
+        addSystemMessage('⚠️ Error: ' + error.message);
+    }
+}
+
+function displayFormData(formData) {
+    let message = `📋 Found ${formData.forms.length} form(s) on this page:\n\n`;
+    
+    formData.forms.forEach((form, idx) => {
+        if (form.standalone) {
+            message += `**Standalone Fields (${form.fields.length}):**\n`;
+        } else {
+            message += `**Form ${idx + 1}** (${form.fields.length} fields):\n`;
+            if (form.formId) message += `ID: ${form.formId}\n`;
+            if (form.formName) message += `Name: ${form.formName}\n`;
+        }
+        
+        form.fields.forEach((field, fieldIdx) => {
+            message += `\n${fieldIdx + 1}. `;
+            if (field.label) message += `**${field.label}** `;
+            message += `(${field.type})`;
+            if (field.name) message += ` [name: ${field.name}]`;
+            if (field.id) message += ` [id: ${field.id}]`;
+            if (field.placeholder) message += `\n   Placeholder: "${field.placeholder}"`;
+            if (field.value) message += `\n   Value: "${field.value.substring(0, 50)}"`;
+            if (field.required) message += ` [Required]`;
+            if (field.disabled) message += ` [Disabled]`;
+            if (field.selector) message += `\n   Selector: \`${field.selector}\``;
+        });
+        
+        message += '\n\n';
+    });
+    
+    addSystemMessage(message);
+}
+
+async function handleStartFormMonitoring() {
+    addSystemMessage('🔍 Starting form monitoring...');
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (!tabs[0]) {
+            addSystemMessage('⚠️ No active tab found');
+            return;
+        }
+        
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_FORM_MONITORING' }, (response) => {
+            if (chrome.runtime.lastError) {
+                addSystemMessage('⚠️ Error: ' + chrome.runtime.lastError.message);
+                return;
+            }
+            
+            if (response && response.success) {
+                addSystemMessage('✅ Form monitoring started. Watching for form changes...');
+            }
+        });
+    });
+}
+
+// Function to update a form field (can be called from chat or direct command)
+async function updateFormFieldValue(selector, value) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (!tabs[0]) {
+            addSystemMessage('⚠️ No active tab found');
+            return;
+        }
+        
+        chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'UPDATE_FORM_FIELD',
+            selector: selector,
+            value: value
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                addSystemMessage('⚠️ Error: ' + chrome.runtime.lastError.message);
+                return;
+            }
+            
+            if (response && response.success) {
+                addSystemMessage(`✅ Updated field: ${selector} = "${value}"`);
+            } else {
+                addSystemMessage(`⚠️ Failed to update field: ${response?.result?.error || 'Unknown error'}`);
+            }
+        });
+    });
 }
 
 async function handleEligibilityCheck() {

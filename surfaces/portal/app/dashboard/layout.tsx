@@ -82,6 +82,13 @@ export default function DashboardLayout({
                             <span className="text-sm font-medium">Knowledge</span>
                         </div>
                     </Link>
+                    {/* Eligibility Navigation Button */}
+                    <Link href="/dashboard/eligibility-v2">
+                        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-colors ${isActive('/dashboard/eligibility-v2') ? 'bg-white text-pink-600 shadow-sm' : 'text-[#444746] hover:bg-white/60'}`}>
+                            <span className="inline-block w-5 h-5 rounded-full bg-pink-200 text-pink-600 flex items-center justify-center font-bold">E</span>
+                            <span className="text-sm font-medium">Eligibility</span>
+                        </div>
+                    </Link>
                     <Link href="/dashboard/admin">
                         <div className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-colors ${isActive('/dashboard/admin') ? 'bg-white text-slate-800 shadow-sm' : 'text-[#444746]/60 hover:bg-white/60'}`}>
                             <Settings className={`w-5 h-5 ${isActive('/dashboard/admin') ? 'text-slate-800' : 'text-[#5F6368]/60'}`} />

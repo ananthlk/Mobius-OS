@@ -406,6 +406,346 @@
         }
     }
 
+    // === FORM MONITORING AND MANIPULATION ===
+    
+    // Track all forms on the page
+    let formMonitor = null;
+    let monitoredForms = new Map();
+    
+    // Generate a reliable CSS selector for an element
+    function generateSelector(element) {
+        if (element.id) {
+            return `#${element.id}`;
+        }
+        
+        if (element.name && element.tagName.toLowerCase() !== 'body' && element.tagName.toLowerCase() !== 'html') {
+            return `${element.tagName.toLowerCase()}[name="${element.name}"]`;
+        }
+        
+        // Build path from parent
+        const path = [];
+        let current = element;
+        while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName.toLowerCase() !== 'body') {
+            let selector = current.tagName.toLowerCase();
+            
+            if (current.className && typeof current.className === 'string') {
+                const classes = current.className.split(' ').filter(c => c.length > 0).slice(0, 2);
+                if (classes.length > 0) {
+                    selector += '.' + classes.join('.');
+                }
+            }
+            
+            // Add nth-child if needed for uniqueness
+            const siblings = Array.from(current.parentNode?.children || [])
+                .filter(el => el.tagName === current.tagName);
+            if (siblings.length > 1) {
+                const index = siblings.indexOf(current) + 1;
+                selector += `:nth-child(${index})`;
+            }
+            
+            path.unshift(selector);
+            current = current.parentElement;
+        }
+        
+        return path.join(' > ');
+    }
+    
+    // Detect and extract form fields
+    function extractFormFields() {
+        console.log('[Möbius Spectacles] Extracting form fields...');
+        
+        const forms = document.querySelectorAll('form');
+        const formData = [];
+        
+        forms.forEach((form, formIndex) => {
+            const fields = [];
+            
+            // Get all input elements
+            const inputs = form.querySelectorAll('input, textarea, select');
+            inputs.forEach((input, index) => {
+                const fieldInfo = {
+                    index: index,
+                    type: input.type || input.tagName.toLowerCase(),
+                    name: input.name || '',
+                    id: input.id || '',
+                    placeholder: input.placeholder || '',
+                    value: input.value || '',
+                    label: '',
+                    required: input.required || false,
+                    disabled: input.disabled || false,
+                    readonly: input.readOnly || false,
+                    className: input.className || '',
+                    selector: generateSelector(input)
+                };
+                
+                // Try to find associated label
+                if (input.id) {
+                    const label = document.querySelector(`label[for="${input.id}"]`);
+                    if (label) {
+                        fieldInfo.label = label.textContent.trim();
+                    }
+                } else {
+                    // Look for parent label
+                    const parentLabel = input.closest('label');
+                    if (parentLabel) {
+                        fieldInfo.label = parentLabel.textContent.trim();
+                    }
+                }
+                
+                // For select elements, get options
+                if (input.tagName.toLowerCase() === 'select') {
+                    fieldInfo.options = Array.from(input.options).map(opt => ({
+                        value: opt.value,
+                        text: opt.text,
+                        selected: opt.selected
+                    }));
+                }
+                
+                fields.push(fieldInfo);
+            });
+            
+            if (fields.length > 0) {
+                formData.push({
+                    formIndex: formIndex,
+                    formId: form.id || '',
+                    formName: form.name || '',
+                    formAction: form.action || '',
+                    formMethod: form.method || 'get',
+                    fields: fields,
+                    selector: generateSelector(form)
+                });
+            }
+        });
+        
+        // Also get standalone inputs/textarea/select outside forms
+        const standaloneInputs = document.querySelectorAll('input:not(form input), textarea:not(form textarea), select:not(form select)');
+        if (standaloneInputs.length > 0) {
+            const standaloneFields = Array.from(standaloneInputs).map((input, index) => {
+                const fieldInfo = {
+                    index: index,
+                    type: input.type || input.tagName.toLowerCase(),
+                    name: input.name || '',
+                    id: input.id || '',
+                    placeholder: input.placeholder || '',
+                    value: input.value || '',
+                    label: '',
+                    required: input.required || false,
+                    disabled: input.disabled || false,
+                    readonly: input.readOnly || false,
+                    className: input.className || '',
+                    selector: generateSelector(input),
+                    standalone: true
+                };
+                
+                // Try to find label
+                if (input.id) {
+                    const label = document.querySelector(`label[for="${input.id}"]`);
+                    if (label) {
+                        fieldInfo.label = label.textContent.trim();
+                    }
+                }
+                
+                return fieldInfo;
+            });
+            
+            formData.push({
+                formIndex: -1,
+                standalone: true,
+                fields: standaloneFields
+            });
+        }
+        
+        console.log('[Möbius Spectacles] Found', formData.length, 'form(s) with', 
+                   formData.reduce((sum, f) => sum + f.fields.length, 0), 'total fields');
+        
+        return {
+            url: window.location.href,
+            timestamp: new Date().toISOString(),
+            forms: formData
+        };
+    }
+    
+    // Update a form field value
+    function updateFormField(selector, value, options = {}) {
+        console.log('[Möbius Spectacles] Updating form field:', selector, '=', value);
+        
+        try {
+            let element = null;
+            
+            // Try multiple selector strategies
+            if (selector.startsWith('#')) {
+                element = document.querySelector(selector);
+            } else if (selector.startsWith('[') && selector.includes('name=')) {
+                element = document.querySelector(selector);
+            } else {
+                // Try as CSS selector first
+                element = document.querySelector(selector);
+                
+                // If not found, try xpath (for complex selectors)
+                if (!element && options.xpath) {
+                    const xpathResult = document.evaluate(options.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    element = xpathResult.singleNodeValue;
+                }
+            }
+            
+            if (!element) {
+                throw new Error(`Field not found: ${selector}`);
+            }
+            
+            // Check if field is disabled or readonly (unless force option is set)
+            if (!options.force) {
+                if (element.disabled) {
+                    throw new Error(`Field is disabled: ${selector}`);
+                }
+                if (element.readOnly) {
+                    throw new Error(`Field is readonly: ${selector}`);
+                }
+            }
+            
+            // Update based on field type
+            const tagName = element.tagName.toLowerCase();
+            const fieldType = element.type?.toLowerCase();
+            
+            if (tagName === 'select') {
+                // For select, try to match by value or text
+                const option = Array.from(element.options).find(opt => 
+                    opt.value === value || opt.text === value
+                );
+                if (option) {
+                    element.value = option.value;
+                } else {
+                    element.value = value;
+                }
+            } else if (tagName === 'textarea') {
+                element.value = value;
+            } else if (fieldType === 'checkbox') {
+                element.checked = Boolean(value);
+            } else if (fieldType === 'radio') {
+                // For radio, find the radio button with matching value
+                const radioGroup = document.querySelectorAll(`input[name="${element.name}"][type="radio"]`);
+                const matchingRadio = Array.from(radioGroup).find(radio => radio.value === value);
+                if (matchingRadio) {
+                    matchingRadio.checked = true;
+                }
+            } else {
+                // Standard text/email/password/etc input
+                element.value = value;
+            }
+            
+            // Trigger events to simulate user input (important for React/Vue/etc)
+            const events = ['input', 'change', 'blur'];
+            events.forEach(eventType => {
+                const event = new Event(eventType, { bubbles: true, cancelable: true });
+                element.dispatchEvent(event);
+            });
+            
+            // Also trigger React/Vue specific events
+            if (element._valueTracker) {
+                element._valueTracker.setValue('');
+            }
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (nativeInputValueSetter && tagName === 'input') {
+                nativeInputValueSetter.call(element, value);
+            }
+            
+            console.log('[Möbius Spectacles] Successfully updated field:', selector);
+            
+            return {
+                success: true,
+                selector: selector,
+                oldValue: element.defaultValue || '',
+                newValue: value,
+                fieldType: fieldType || tagName
+            };
+            
+        } catch (error) {
+            console.error('[Möbius Spectacles] Error updating form field:', error);
+            return {
+                success: false,
+                selector: selector,
+                error: error.message
+            };
+        }
+    }
+    
+    // Monitor form changes using MutationObserver
+    function startFormMonitoring() {
+        if (formMonitor) {
+            console.log('[Möbius Spectacles] Form monitoring already active');
+            return;
+        }
+        
+        console.log('[Möbius Spectacles] Starting form monitoring...');
+        
+        // Initial scan
+        const initialForms = extractFormFields();
+        initialForms.forms.forEach(form => {
+            if (form.formIndex >= 0) {
+                monitoredForms.set(form.formIndex, form);
+            }
+        });
+        
+        // Monitor DOM changes
+        formMonitor = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                // Check if forms were added/removed
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Check if a form was added
+                            if (node.tagName?.toLowerCase() === 'form') {
+                                console.log('[Möbius Spectacles] New form detected');
+                                const formData = extractFormFields();
+                                chrome.runtime.sendMessage({
+                                    type: 'FORM_DETECTED',
+                                    formData: formData
+                                }).catch(err => console.error('Error sending form data:', err));
+                            }
+                            
+                            // Check if any inputs were added
+                            const newInputs = node.querySelectorAll?.('input, textarea, select');
+                            if (newInputs && newInputs.length > 0) {
+                                console.log('[Möbius Spectacles] New input fields detected');
+                                const formData = extractFormFields();
+                                chrome.runtime.sendMessage({
+                                    type: 'FORM_FIELDS_CHANGED',
+                                    formData: formData
+                                }).catch(err => console.error('Error sending form change:', err));
+                            }
+                        }
+                    });
+                }
+                
+                // Monitor value changes on inputs
+                if (mutation.type === 'attributes' && mutation.target.tagName) {
+                    const tag = mutation.target.tagName.toLowerCase();
+                    if (['input', 'textarea', 'select'].includes(tag) && mutation.attributeName === 'value') {
+                        console.log('[Möbius Spectacles] Form field value changed:', mutation.target);
+                    }
+                }
+            });
+        });
+        
+        // Start observing
+        formMonitor.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['value', 'checked', 'selected']
+        });
+        
+        console.log('[Möbius Spectacles] Form monitoring active');
+    }
+    
+    function stopFormMonitoring() {
+        if (formMonitor) {
+            formMonitor.disconnect();
+            formMonitor = null;
+            monitoredForms.clear();
+            console.log('[Möbius Spectacles] Form monitoring stopped');
+        }
+    }
+
     // Listen for requests from background script
     if (chrome.runtime && chrome.runtime.onMessage) {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -424,11 +764,41 @@
                 const treeData = scrapeFullPageTree();
                 sendResponse({ success: true, treeData: treeData });
                 return true;
+            } else if (request.type === 'EXTRACT_FORMS') {
+                console.log('[Möbius Spectacles] Received EXTRACT_FORMS request');
+                const formData = extractFormFields();
+                sendResponse({ success: true, formData: formData });
+                return true;
+            } else if (request.type === 'UPDATE_FORM_FIELD') {
+                console.log('[Möbius Spectacles] Received UPDATE_FORM_FIELD request');
+                const result = updateFormField(request.selector, request.value, request.options || {});
+                sendResponse({ success: result.success, result: result });
+                return true;
+            } else if (request.type === 'START_FORM_MONITORING') {
+                console.log('[Möbius Spectacles] Received START_FORM_MONITORING request');
+                startFormMonitoring();
+                sendResponse({ success: true, message: 'Form monitoring started' });
+                return true;
+            } else if (request.type === 'STOP_FORM_MONITORING') {
+                console.log('[Möbius Spectacles] Received STOP_FORM_MONITORING request');
+                stopFormMonitoring();
+                sendResponse({ success: true, message: 'Form monitoring stopped' });
+                return true;
             }
             return false;
         });
     } else {
         console.error('[Möbius Spectacles] chrome.runtime.onMessage not available');
+    }
+
+    // Auto-start form monitoring on secure pages (LinkedIn, etc.)
+    if (window.location.hostname.includes('linkedin.com') || 
+        window.location.hostname.includes('facebook.com') ||
+        window.location.protocol === 'https:') {
+        console.log('[Möbius Spectacles] Secure page detected, starting form monitoring...');
+        setTimeout(() => {
+            startFormMonitoring();
+        }, 2000); // Wait 2 seconds for page to load
     }
 
 })();
